@@ -4,6 +4,9 @@ from matplotlib import animation
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+def index_include(data, include):
+    return data[list(set(include))]
+
 # Input a numpy array and a tuple and indexes everything except the indices of that tuple
 def index_exclude(data, exclude):
     return data[list(set(range(len(data))) - set(exclude))]
@@ -19,7 +22,10 @@ def load_data():
 
     return data, device
 
-def wrap_data(input, data, train_idx: tuple[int, ...]):
+def split_data(ins, data, train_idx):
+    return index_include(ins, train_idx), index_include(data, train_idx), index_exclude(ins, train_idx), index_exclude(data, train_idx)
+
+def wrap_data(ins, data, train_idx: tuple[int, ...]):
     class WrappedData(Dataset):
         def __init__(self, input, data):
             self.input = np.array(input)
@@ -35,11 +41,13 @@ def wrap_data(input, data, train_idx: tuple[int, ...]):
 
     train_idx = tuple(train_idx)
 
+    xtrain, ytrain, xtest, ytest = split_data(ins, data, train_idx)
+
     # Train data from 1, 11, 21, ..., 101
-    train_data = WrappedData(input[train_idx,], data[train_idx, :, :])
+    train_data = WrappedData(xtrain, ytrain)
 
     # Test data from the others
-    test_data = WrappedData(index_exclude(input, train_idx), index_exclude(data, train_idx))
+    test_data = WrappedData(xtest, ytest)
 
     # Wrap in data loaders
     train_dl = DataLoader(train_data, batch_size=1, shuffle=True)
