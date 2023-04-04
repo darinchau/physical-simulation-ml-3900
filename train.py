@@ -1,12 +1,12 @@
 import numpy as np
-from load_mesh import load_data, wrap_data, make_anim
+from load_mesh import load_data, wrap_data, make_anim, index_exclude, index_include
 from models import *
 import matplotlib.pyplot as plt
 import time
 
 model_name = "model_2"
 
-def do_stuff():
+def train_mlp():
     data, device = load_data()
     inputs = np.arange(101)
     train_idx = list(range(101))[::10]
@@ -48,3 +48,17 @@ def predict_with_name(name):
     # net = torch.load(f"{model_name}.pt")
     net.eval()
     return predict(net)
+
+def train_gaussian_process():
+    data, _ = load_data()
+    ins = np.arange(101)
+    training_idx = list(range(101))[::10]
+
+    train_idx, test_idx = index_include(ins, training_idx), index_exclude(ins, training_idx)
+
+    xtrain, xtest = ins[train_idx], ins[test_idx]
+    ytrain, ytest = data[train_idx], data[test_idx]
+
+    model, _ = train_gaussian1(xtrain, xtest, ytrain, ytest)
+
+    return model, data

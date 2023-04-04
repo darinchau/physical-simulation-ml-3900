@@ -4,10 +4,11 @@ from matplotlib import animation
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+# Input a numpy array and a tuple and indexes everything in the indices of that tuple. Messes up order.
 def index_include(data, include):
-    return data[list(set(include))]
+    return data[list(include)]
 
-# Input a numpy array and a tuple and indexes everything except the indices of that tuple
+# Input a numpy array and a tuple and indexes everything except the indices of that tuple. May mess up data order
 def index_exclude(data, exclude):
     return data[list(set(range(len(data))) - set(exclude))]
 

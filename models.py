@@ -1,14 +1,10 @@
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
-from torchvision import datasets
-from torchvision.transforms import ToTensor
 import numpy as np
-from torch.utils.data import Dataset
 import torch.optim as optim
-from load_mesh import split_data
-from lazypredict.Supervised import LazyRegressor
 from tqdm import trange
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF
 
 def train(train_loader, test_loader, net, epochs = 5, verbose = False):
     optimizer = optim.SGD(net.parameters(), lr=0.01)
@@ -72,3 +68,23 @@ def train_mlp1(train_loader, test_loader, epochs, verbose = False):
     # Instantiate the network and the optimizer
     net = Net()
     return train(train_loader, test_loader, net, epochs, verbose = verbose)
+
+def train_gaussian1(xtrain, xtest, ytrain, ytest):
+    # Define the kernel function
+    kernel = RBF(length_scale=1.0)
+
+    # Define the Gaussian Process Regression model
+    model = GaussianProcessRegressor(kernel=kernel, alpha=1e-5, n_restarts_optimizer=10)
+
+    # Train the model on the training data
+    model.fit(xtrain, ytrain)
+
+    # Predict the output for the testing data
+    ypred = model.predict(xtest)
+
+    # Calculate the mean square error
+    mse = np.mean((ytest - ypred)**2)
+
+    print(f"Finished training Gaussian process. Error: {mse}")
+
+    return model, mse
