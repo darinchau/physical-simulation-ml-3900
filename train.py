@@ -50,15 +50,27 @@ def predict_with_name(name):
     return predict(net)
 
 def train_gaussian_process():
+    # Reshape data because gaussian process expects one dimensional output only
     data, _ = load_data()
-    ins = np.arange(101)
+    data = data.reshape((101, -1))
+
+    inputs = np.arange(101)*0.75/100
+
+    # Create and split training data and testing data via index
+    idxs = np.arange(101)
     training_idx = list(range(101))[::10]
 
-    train_idx, test_idx = index_include(ins, training_idx), index_exclude(ins, training_idx)
+    train_idx, test_idx = index_include(idxs, training_idx), index_exclude(idxs, training_idx)
 
-    xtrain, xtest = ins[train_idx], ins[test_idx]
+    # Create the data
+
+    xtrain, xtest = inputs[train_idx], inputs[test_idx]
     ytrain, ytest = data[train_idx], data[test_idx]
 
-    model, _ = train_gaussian1(xtrain, xtest, ytrain, ytest)
+    xtrain = xtrain.reshape(-1, 1)
+    xtest = xtest.reshape(-1, 1)
 
-    return model, data
+    # Train the model
+    model, err = train_gaussian1(xtrain, xtest, ytrain, ytest)
+
+    return model, data, err

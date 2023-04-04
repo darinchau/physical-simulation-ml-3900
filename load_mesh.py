@@ -15,11 +15,11 @@ def index_exclude(data, exclude):
 # Load and return data. We expect data to be some 3 dimensional np array (N, rows, cols).
 def load_data():
     data = np.load("mesh_data_electrostatic_potential.npy")
-    print(f"Loaded data wiht shape {data.shape}")
+    # print(f"Loaded data wiht shape {data.shape}")
 
     # Get cpu or gpu device for training.
     device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-    print(f"Using {device} device")
+    # print(f"Using {device} device")
 
     return data, device
 
@@ -57,7 +57,7 @@ def wrap_data(ins, data, train_idx: tuple[int, ...]):
 
     return train_dl, test_dl
 
-def make_anim(data):
+def make_anim(data, path = None):
     # Set up figure and axis for animation
     fig, ax = plt.subplots()
     heatmap = ax.imshow(data[0], cmap='hot')
@@ -68,5 +68,10 @@ def make_anim(data):
         return heatmap,
 
     # Create animation object and display it
-    ani = animation.FuncAnimation(fig, update, frames=data.shape[0], interval=50, blit=True)
-    plt.show()
+    anim = animation.FuncAnimation(fig, update, frames=data.shape[0], interval=50, blit=True)
+
+    if path is not None:
+        writergif = animation.PillowWriter(fps=30)
+        anim.save(path, writer=writergif)
+    else:
+        plt.show()
