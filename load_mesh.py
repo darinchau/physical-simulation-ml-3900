@@ -22,8 +22,8 @@ def load_data():
 
     return data, device
 
-def split_data(ins, data, train_idx):
-    return index_include(ins, train_idx), index_include(data, train_idx), index_exclude(ins, train_idx), index_exclude(data, train_idx)
+def split_data(ins, train_idx):
+    return index_include(ins, train_idx), index_exclude(ins, train_idx)
 
 def wrap_data(ins, data, train_idx: tuple[int, ...]):
     class WrappedData(Dataset):
@@ -32,22 +32,23 @@ def wrap_data(ins, data, train_idx: tuple[int, ...]):
             self.data = np.array(data)
 
         def __getitem__(self, index):
-            x = self.input[index]
-            y = self.data[index]
+            idx = self.input[index]
+            x = idx * 0.75 / 100
+            y = self.data[idx]
             return x, y
 
         def __len__(self):
-            return len(self.data)
+            return len(self.input)
 
     train_idx = tuple(train_idx)
 
-    xtrain, ytrain, xtest, ytest = split_data(ins, data, train_idx)
+    xtrain, xtest= split_data(ins, train_idx)
 
     # Train data from 1, 11, 21, ..., 101
-    train_data = WrappedData(xtrain, ytrain)
+    train_data = WrappedData(xtrain, data)
 
     # Test data from the others
-    test_data = WrappedData(xtest, ytest)
+    test_data = WrappedData(xtest, data)
 
     # Wrap in data loaders
     train_dl = DataLoader(train_data, batch_size=1, shuffle=True)
