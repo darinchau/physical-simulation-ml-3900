@@ -85,6 +85,6 @@ def train_gaussian1(xtrain, xtest, ytrain, ytest):
     # Calculate the mean square error
     mse = np.mean((ytest - ypred)**2)
 
-    print(f"Finished training Gaussian process. Error: {mse}")
+    print(f"Finished training Gaussian process. Error: {mse}, worse: {np.max(np.abs(ytest - ypred))}")
 
     return model, mse

@@ -1,9 +1,6 @@
 from train import train_mlp, predict_with_name, predict, train_gaussian_process
 from load_mesh import load_data, make_anim
 import numpy as np
-from load_mesh import index_include
-
-from scipy.optimize import minimize
 
 def dem1():
     pred = predict_with_name("model_1")
@@ -13,6 +10,7 @@ def dem1():
     make_anim(data, "dem1_data.gif")
 
     err = np.abs(pred - data)
+    print(np.mean((pred - data)**2))
     err = err / np.max(err)
     make_anim(err, "dem1_err.gif")
 
@@ -32,5 +30,5 @@ def dem2():
     make_anim(err, "dem2_err.gif")
 
 if __name__ == "__main__":
-    dem1()
+    # dem1()
     dem2()
