@@ -1,19 +1,65 @@
 import numpy as np
-from load_mesh import load_data, wrap_data, make_anim, index_exclude, index_include
-from models import *
+from load import load_data_week_1, wrap_data, make_anim, index_exclude, index_include
 import matplotlib.pyplot as plt
 import time
+import torch
+from torch import nn
+import numpy as np
+import torch.optim as optim
+from tqdm import trange
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF
 
-model_name = "model_2"
+# Raw training code
+def train_net(train_loader, test_loader, net, epochs = 5, verbose = False):
+    optimizer = optim.SGD(net.parameters(), lr=0.01)
 
-def train_mlp():
-    data, device = load_data()
-    inputs = np.arange(101)
-    train_idx = list(range(101))[::10]
-    ins, outs = wrap_data(inputs, data, train_idx)
+    # Define the loss function
+    criterion = nn.MSELoss()
+
+    history = []
+
+    # Train the network
+    for epoch in trange(epochs):
+        running_loss = 0.0
+        for i, dat in enumerate(train_loader, 0):
+            inputs, labels = dat
+            inputs = inputs.float()
+            labels = labels.float()
+            optimizer.zero_grad()
+            outputs = net(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+        if verbose:
+            print("Epoch %d, loss: %.3f" % (epoch+1, running_loss/len(train_loader)))
+
+        train_loss = running_loss/len(train_loader)
+
+        # Test the network
+        with torch.no_grad():
+            running_loss = 0.0
+            for i, dat in enumerate(test_loader, 0):
+                inputs, labels = dat
+                inputs = inputs.float()
+                labels = labels.float()
+                outputs = net(inputs)
+                loss = criterion(outputs, labels)
+                running_loss += loss.item()
+            if verbose:
+                print("Test loss: %.3f" % (running_loss/len(test_loader)))
+            test_loss = running_loss/len(test_loader)
+
+        history.append((train_loss, test_loss))
+    return net, history
+
+# Trains the MLP. Returns net, data, history
+def train_mlp(inputs, data, training_idx, net, model_name = None):
+    train_dl, test_dl = wrap_data(inputs, data, training_idx)
 
     # Train on MLP
-    net, hist = train_mlp1(ins, outs, epochs = 200000, verbose = False)
+    net, hist = train_net(train_dl, test_dl, net, epochs = 200000, verbose = False)
 
     hist = hist[1:]
 
@@ -25,45 +71,49 @@ def train_mlp():
 
     print(min(hist, key = lambda x: x[1]))
 
+    if model_name is None:
+        model_name = f"model{time.time()}"
+
     # Save the model
     torch.save(net, model_name)
-    return net, data
+    return net, data, hist
 
-def predict(net):
-    # net = torch.load(model_name)
-    # # net = torch.load(f"{model_name}.pt")
-    # net.eval()
+# Raw code for gaussian model training
+def train_gaussian_raw(xtrain, xtest, ytrain, ytest):
+    # Define the kernel function
+    kernel = RBF(length_scale=1.0)
 
-    recreated_data = np.zeros((101, 129, 17))
+    # Define the Gaussian Process Regression model
+    model = GaussianProcessRegressor(kernel=kernel, alpha=1e-5, n_restarts_optimizer=10)
 
-    with torch.no_grad():
-        for i in range(101):
-            inp = torch.tensor([i*0.75/100]).float()
-            recreated_data[i,:,:] = net(inp).numpy()[0]
+    # Train the model on the training data
+    model.fit(xtrain, ytrain)
 
-    return recreated_data
+    # Predict the output for the testing data
+    ypred = model.predict(xtest)
 
-def predict_with_name(name):
-    net = torch.load(name)
-    # net = torch.load(f"{model_name}.pt")
-    net.eval()
-    return predict(net)
+    # Calculate the mean square error
+    mse = np.mean((ytest - ypred)**2)
 
-def train_gaussian_process():
+    print(f"Finished training Gaussian process. Error: {mse}, worse: {np.max(np.abs(ytest - ypred))}")
+
+    return model, mse
+
+# Wrapper around raw code
+def train_gaussian_process(inputs, data, training_idx):
     # Reshape data because gaussian process expects one dimensional output only
-    data, _ = load_data()
-    data = data.reshape((101, -1))
+    num_data = data.shape[0]
 
-    inputs = np.arange(101)*0.75/100
+    # Make a copy
+    data = np.array(data)
+    data = data.reshape((num_data, -1))
 
     # Create and split training data and testing data via index
-    idxs = np.arange(101)
-    training_idx = list(range(101))[::10]
+    idxs = np.arange(num_data)
 
     train_idx, test_idx = index_include(idxs, training_idx), index_exclude(idxs, training_idx)
 
     # Create the data
-
     xtrain, xtest = inputs[train_idx], inputs[test_idx]
     ytrain, ytest = data[train_idx], data[test_idx]
 
@@ -71,6 +121,6 @@ def train_gaussian_process():
     xtest = xtest.reshape(-1, 1)
 
     # Train the model
-    model, err = train_gaussian1(xtrain, xtest, ytrain, ytest)
+    model, err = train_gaussian_raw(xtrain, xtest, ytrain, ytest)
 
-    return model, data, err
+    return model, err
