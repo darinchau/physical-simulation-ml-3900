@@ -7,8 +7,8 @@ from torch import nn
 import numpy as np
 import torch.optim as optim
 from tqdm import trange
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import RBF
+from lazypredict.Supervised import LazyRegressor
+from raw_train import GaussianRegression
 
 # Raw training code
 def train_net(train_loader, test_loader, net, epochs = 5, verbose = False):
@@ -80,30 +80,15 @@ def train_mlp(inputs, data, training_idx, net, model_name = None):
     torch.save(net, model_name)
     return net, data, hist
 
-# Raw code for gaussian model training
-def train_gaussian_raw(xtrain, xtest, ytrain, ytest):
-    # Define the kernel function
-    kernel = RBF(length_scale=1.0)
-
-    # Define the Gaussian Process Regression model
-    model = GaussianProcessRegressor(kernel=kernel, alpha=1e-5, n_restarts_optimizer=10)
-
-    # Train the model on the training data
-    model.fit(xtrain, ytrain)
-
-    # Predict the output for the testing data
-    ypred = model.predict(xtest)
-
-    # Calculate the mean square error
-    mse = np.mean((ytest - ypred)**2)
-    worse = np.max(np.abs(ytest - ypred))
-
-    print(f"MSE: {mse}, worse: {worse}")
-
-    return model, (mse, worse)
-
 # Wrapper around raw code
 def train_gaussian_process(inputs, data, training_idx):
+    # Train the model
+    model, err = GaussianRegression().fit(inputs, data, training_idx, verbose = True)
+
+    return model, err
+
+# Use the lazypredict library to see if we can get anything out of it
+def lazy_predict(inputs, data, training_idx):
     # Reshape data because gaussian process expects one dimensional output only
     num_data = data.shape[0]
 
@@ -123,7 +108,13 @@ def train_gaussian_process(inputs, data, training_idx):
     xtrain = xtrain.reshape(-1, 1)
     xtest = xtest.reshape(-1, 1)
 
-    # Train the model
-    model, err = train_gaussian_raw(xtrain, xtest, ytrain, ytest)
+    # Initialize LazyRegressor
+    reg = LazyRegressor(verbose=0, ignore_warnings=True, custom_metric=None)
 
-    return model, err
+    # Train and test various models
+    models, predictions = reg.fit(xtrain, xtest, ytrain, ytest)
+
+    # Print the model performances
+    print(models)
+
+    return models
