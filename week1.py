@@ -58,7 +58,7 @@ def dem2():
     data = load_data_week_1()
     train_idx = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
-    model, _ = train_gaussian_process()
+    model, _ = train_gaussian_process(inputs, data, train_idx)
 
     idxs = inputs.reshape((-1, 1))
     pred = model.predict(idxs)
@@ -71,5 +71,4 @@ def dem2():
     make_anim(err, "err2.gif")
 
 if __name__ == "__main__":
-    dem1()
     dem2()

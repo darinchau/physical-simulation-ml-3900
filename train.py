@@ -69,7 +69,9 @@ def train_mlp(inputs, data, training_idx, net, model_name = None):
     plt.yscale('log')
     plt.show()
 
-    print(min(hist, key = lambda x: x[1]))
+    min_training = min(enumerate(hist), key = lambda x: x[1][1])
+
+    print(f"Minimum training data: epoch {min_training[0]} with MSE = {min_training[1][1]}")
 
     if model_name is None:
         model_name = f"model{time.time()}"
@@ -94,10 +96,11 @@ def train_gaussian_raw(xtrain, xtest, ytrain, ytest):
 
     # Calculate the mean square error
     mse = np.mean((ytest - ypred)**2)
+    worse = np.max(np.abs(ytest - ypred))
 
-    print(f"Finished training Gaussian process. Error: {mse}, worse: {np.max(np.abs(ytest - ypred))}")
+    print(f"MSE: {mse}, worse: {worse}")
 
-    return model, mse
+    return model, (mse, worse)
 
 # Wrapper around raw code
 def train_gaussian_process(inputs, data, training_idx):
