@@ -6,6 +6,11 @@ from matplotlib import animation
 import torch
 from torch.utils.data import Dataset, DataLoader
 from math import ceil
+import subprocess
+
+def optimize_gif(path):
+    # Uses the gifsicle library
+    subprocess.call(['gifsicle', '-O3', '--optimize', path, '--colors', '256', '--output', path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 # Input a numpy array and a tuple and indexes everything in the indices of that tuple. May messes up order.
 def index_include(data, include):
@@ -92,9 +97,9 @@ def make_anim_week_2(predicted_data, original_data, path = None, prediction_name
     # Figure title
     fig.suptitle(f"Results from {str(prediction_name)}")
 
-    # First Color bar ranges for data and predicted heatmap to normalize the cbar for data and prediction
-    vmin = min(np.min(original_data), np.min(predicted_data))
-    vmax = min(np.max(original_data), np.max(predicted_data))
+    # Use the same color bar for data for predicted results as well
+    vmin = np.min(original_data)
+    vmax = np.max(original_data)
 
     # Ax 0 corresponds to the prediction and the data
     axes[0].set_aspect("equal", adjustable="box")
@@ -158,6 +163,7 @@ def make_anim_week_2(predicted_data, original_data, path = None, prediction_name
     if path is not None:
         writergif = animation.PillowWriter(fps=30)
         anim.save(path, writer=writergif)
+        optimize_gif(path)
     else:
         plt.show()
 

@@ -19,17 +19,17 @@ def too_many_split(e: ValueError):
 
 # Create a folder and if folder exists, remove/overwrite everything inside :D
 def create_folder_directory(folder_path):
-    if os.path.exists(folder_path):
-        try:
-            # Delete the folder and its contents
-            shutil.rmtree(folder_path)
-        except:
-            raise Exception(f"Error deleting folder: {folder_path}")
-    try:
-        # Create the folder directory
+    if not os.path.exists(folder_path):
         os.makedirs(folder_path)
-    except:
-        raise Exception(f"Error creating folder: {folder_path}")
+        return folder_path
+    else:
+        i = 1
+        while True:
+            new_path = f"{folder_path} ({i})"
+            if not os.path.exists(new_path):
+                os.makedirs(new_path)
+                return new_path
+            i += 1
 
 # Get the first n inputs as inputs, data and train index
 def get_first_n_inputs(n):
@@ -48,7 +48,7 @@ def model_test(regressor: Regressor, use_progress_bar = False, num_to_test = 101
     model_name = regressor.model_name
 
     path = f"./Datas/Week 2/{model_name}"
-    create_folder_directory(path)
+    path = create_folder_directory(path)
     logs_file = f"{path}/{model_name} logs.txt"
 
     logs = []
@@ -91,12 +91,13 @@ def model_test(regressor: Regressor, use_progress_bar = False, num_to_test = 101
 
     # Create the file and overwrite as blank if necessary
     with open(logs_file, 'w') as f:
-        f.write('')
+        f.write(regressor.train_info)
+        f.write("\n")
 
     with open(logs_file, 'a') as f:
         for log in logs:
             f.write(log)
-            f.write("\n")
+            f.write("\n\n\n")
 
     # Plot everything
     plt.figure()
@@ -116,55 +117,51 @@ def test_anim():
 ############################################
 
 # For parallel model testing
-def execute_test(model):
-    model_test(model, num_to_test=7, verbose=True)
+def execute_test(model, num_to_test):
+    model_test(model, num_to_test=num_to_test, verbose=True, use_progress_bar=False)
 
-# Sequentially train all models and test the results
-def test_all_models_sequential(models):
+# Sequentially/Parallelly(?) train all models and test the results
+def test_all_models(models, sequential):
     t = time.time()
 
-    for model in models:
-        execute_test(model, use_progress_bar=True)
+    num_to_test = 101
 
-    print(f"Total time taken sequential: {round(time.time() - t, 3)}")
+    if sequential:
+        for model in models:
+            model_test(model, num_to_test=num_to_test, verbose=False, use_progress_bar=True)
+    else:
+        processes: list[Process] = []
+        for model in models:
+            p = Process(target=execute_test, args=(model, num_to_test))
+            p.start()
+            processes.append(p)
+        for p in processes:
+            p.join()
 
-# Define a function to execute the model_test function in parallel
-def test_all_models_parallel(models):
-    t = time.time()
-    processes: list[Process] = []
-    for model in models:
-        p = Process(target=execute_test, args=[model])
-        p.start()
-        processes.append(p)
-    for p in processes:
-        p.join()
-    print(f"Total time taken parallel: {round(time.time() - t, 3)}")
+    print(f"Total time taken: {round(time.time() - t, 3)}")
 
-def data_batch_1():
-    test_all_models_sequential([
+def batch_1():
+    test_all_models([
         DecisionTreeRegression(),
         RidgeCVRegression(),
         GaussianRegression(),
-        SGDRegression(),
+        SGDRegression(l1_ratio=0.01),
+        SGDRegression(l1_ratio=0.15),
+        SGDRegression(l1_ratio=0.5),
+        SGDRegression(l1_ratio=0.85),
+        SGDRegression(l1_ratio=0.99),
         PassiveAggressiveRegression(),
+        PassiveAggressiveRegression(C = 0.1, max_iter=1000000),
         LinearRegression(),
         MultiTaskLassoCVRegression(),
-        MultiTaskElasticNetCVRegression(),
-        BayesianRidgeRegression()
-    ])
+        MultiTaskElasticNetCVRegression(l1_ratio=0.01),
+        MultiTaskElasticNetCVRegression(l1_ratio=0.25),
+        MultiTaskElasticNetCVRegression(l1_ratio=0.5),
+        MultiTaskElasticNetCVRegression(l1_ratio=0.75),
+        MultiTaskElasticNetCVRegression(l1_ratio=0.99),
+        BayesianRidgeRegression(n_iter=300),
+        BayesianRidgeRegression(n_iter=3000, tol = 0.0001),
+    ], sequential = False)
 
 if __name__ == "__main__":
-    models = [
-        DecisionTreeRegression(),
-        RidgeCVRegression(),
-        GaussianRegression(),
-        SGDRegression(),
-        PassiveAggressiveRegression(),
-        LinearRegression(),
-        MultiTaskLassoCVRegression(),
-        MultiTaskElasticNetCVRegression(),
-        BayesianRidgeRegression()
-    ]
-
-    test_all_models_parallel(models)
-    test_all_models_sequential(models)
+    batch_1()

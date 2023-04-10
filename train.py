@@ -5,6 +5,10 @@ from sklearn.tree import DecisionTreeRegressor as DecisionTree
 import numpy as np
 from abc import abstractmethod as virtual
 from load import index_exclude, index_include
+import warnings
+
+# Filter all scikitlearn warnings
+warnings.filterwarnings('ignore')
 
 class Regressor:
     @property
@@ -24,6 +28,15 @@ class Regressor:
 
     def predict(self, xtest):
         return self.model.predict(xtest)
+
+    @property
+    def train_info(self):
+        st = f"Trained on {self.model_name} with:"
+        for k, v in self.__dict__.items():
+            if k == "_model":
+                continue
+            st += f"\n{k} = {str(v)}"
+        return st
 
     @virtual
     def fit_model(self, xtrain, ytrain):
@@ -74,6 +87,7 @@ class Regressor:
         xtrain, xtest, ytrain, ytest = self.preprocess(inputs, raw_data, training_idx)
 
         # Train the model
+        np.random.seed(12345)
         model = self.fit_model(xtrain, ytrain)
 
         # Calculate and return error
@@ -101,7 +115,7 @@ class GaussianRegression(Regressor):
         return "Gaussian process"
 
 class LinearRegression(Regressor):
-    def fit_model(self, xtrain, xtest, ytrain, ytest, verbose=False, skip_error=False):
+    def fit_model(self, xtrain, ytrain, verbose=False, skip_error=False):
         model =  Linear().fit(xtrain, ytrain)
         return model
 
@@ -204,6 +218,8 @@ class MultipleRegressor(Regressor):
         _, num_tasks = ytest.shape
 
         # Train the model
+        np.random.seed(12345)
+
         models = [None] * num_tasks
 
         for i in range(num_tasks):
