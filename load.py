@@ -1,5 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.colorbar import Colorbar
+from matplotlib.colors import Normalize
 from matplotlib import animation
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -84,40 +86,59 @@ def make_anim_week_2(predicted_data, original_data, path = None, prediction_name
     x, y = np.meshgrid(spacing_x, spacing_y)
 
     # Set up figure and axis for animation
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, gridspec_kw={'height_ratios': [4, 4, 1]})
+    fig, axes = plt.subplots(4, 2, gridspec_kw={'height_ratios': [4, 4, 4, 1], 'width_ratios': [7, 1]})
 
     # Figure title
     fig.suptitle(f"Results from {str(prediction_name)}")
 
-    # Ax 1 corresponds to the prediction
-    ax1.set_aspect("equal", adjustable="box")
-    ax1.set_xlabel("X")
-    ax1.set_ylabel("Y", va="bottom")
-    ax1.set_title(f"Predicted data")
-    ax1.set_yticks([])
-    pred_heatmap = ax1.pcolormesh(x, y, np.transpose(predicted_data[0]), cmap="hot", vmin=np.min(predicted_data), vmax=np.max(predicted_data))
+    # First Color bar ranges for data and predicted heatmap
+    vmin = min(np.min(original_data), np.min(predicted_data))
+    vmax = min(np.max(original_data), np.max(predicted_data))
 
-    # Add a colorbar to the heatmap
-    cbar = ax1.figure.colorbar(pred_heatmap, ax=ax1)
-    cbar.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
+    # Ax 00 corresponds to the prediction and the data
+    axes[0][0].set_aspect("equal", adjustable="box")
+    axes[0][0].set_xlabel("X")
+    axes[0][0].set_ylabel("Y", va="bottom")
+    axes[0][0].set_title(f"Original data")
+    axes[0][0].set_yticks([])
+    data_heatmap = axes[0][0].pcolormesh(x, y, np.transpose(original_data[0]), cmap="hot", vmin=vmin, vmax=vmax)
 
-    # Ax 2 corresponds to the errors
+    # Ax 10 for prediction
+    axes[1][0].set_aspect("equal", adjustable="box")
+    axes[1][0].set_xlabel("X")
+    axes[1][0].set_ylabel("Y", va="bottom")
+    axes[1][0].set_title(f"Predicted data")
+    axes[1][0].set_yticks([])
+    pred_heatmap = axes[1][0].pcolormesh(x, y, np.transpose(predicted_data[0]), cmap="hot", vmin=vmin, vmax=vmax)
+
+    # Ax 1 for the data/prediction colorbar
+    ax1 = [axes[0][1], axes[1][1]]
+    cbar1 = Colorbar(ax1, cmap='hot', norm=Normalize(vmin=vmin, vmax=vmax))
+    cbar1.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
+
+    # Ax 2- corresponds to the errors
     error = np.abs(predicted_data - original_data)
-    ax2.set_aspect("equal", adjustable="box")
-    ax2.set_xlabel("X")
-    ax2.set_ylabel("Y", va="bottom")
-    ax2.set_title(f"Error plot")
-    ax2.set_yticks([])
-    err_heatmap = ax2.pcolormesh(x, y, np.transpose(error[0]), cmap="hot", vmin=0, vmax=np.max(error))
-    cbar = ax2.figure.colorbar(err_heatmap, ax=ax2)
-    cbar.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
+    axes[2][0].set_aspect("equal", adjustable="box")
+    axes[2][0].set_xlabel("X")
+    axes[2][0].set_ylabel("Y", va="bottom")
+    axes[2][0].set_title(f"Error plot")
+    axes[2][0].set_yticks([])
+    err_heatmap = axes[2][0].pcolormesh(x, y, np.transpose(error[0]), cmap="hot", vmin=0, vmax=np.max(error))
+
+    # Ax 21 for the error colorbar
+    cbar2 = Colorbar(axes[2][0], err_heatmap)
+    cbar2.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
 
     # Ax 3 is used purely to display error bounds information
-    ax3.text(0, 0.5, f"RMSE Error = {rmse}, Worst error = {worse}", ha="left", va="center", fontsize=9)
-    ax3.set_axis_off()
+    axes[3][0].text(0, 0.5, f"RMSE Error = {rmse}, Worst error = {worse}", ha="left", va="center", fontsize=9)
+    axes[3][0].set_axis_off()
+
+    # Unused last axis
+    axes[3][1].set_axis_off()
 
     # Define update function for animation
     def update(frame):
+        data_heatmap.set_array(np.transpose(original_data[frame]))
         pred_heatmap.set_array(np.transpose(predicted_data[frame]))
         err_heatmap.set_array(np.transpose(error[frame]))
         return pred_heatmap, err_heatmap

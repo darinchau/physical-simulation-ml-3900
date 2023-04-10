@@ -135,7 +135,9 @@ if __name__ == "__main__":
     # # Close the pool to free up resources
     # pool.close()
 
-    for model in models:
-        model_test(model)
+    # for model in models:
+    #     model_test(model)
+
+    test_anim()
 
     print(f"Total time taken: {round(time.time() - t, 3)}")
