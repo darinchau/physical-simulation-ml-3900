@@ -6,7 +6,7 @@ import time
 from load import load_data_week_1, make_anim_week_2
 import numpy as np
 import matplotlib.pyplot as plt
-from train import Regressor, DecisionTreeRegression, RidgeCVRegression, GaussianRegression, SGDRegression, PassiveAggressiveRegression, LinearRegression, MultiTaskLassoCVRegression, MultiTaskElasticNetCVRegression, BayesianRidgeRegression
+from train import *
 from tqdm import trange
 import re
 from multiprocessing import Process
@@ -40,7 +40,12 @@ def get_first_n_inputs(n):
 
 
 # Takes in a regressor and trains the regressor on 1 - 101 samples
-def model_test(regressor: Regressor, use_progress_bar = False, num_to_test = 101, verbose = False):
+def model_test(regressor: Regressor,
+               num_to_test,
+               use_progress_bar = False,
+               verbose = False,
+               save_prediction_as_anim=False):
+    # Define history array for plotting
     hist = []
     hist_idxs = []
 
@@ -51,14 +56,29 @@ def model_test(regressor: Regressor, use_progress_bar = False, num_to_test = 101
     path = create_folder_directory(path)
     logs_file = f"{path}/{model_name} logs.txt"
 
+    # Set some information on the regressor
+    regressor.set_path(path)
+
+    # Create the logs and description
     logs = []
 
     desc = f"Training {model_name}"
     desc += " " * (45 - len(desc))
 
+    # Save all the predictions instead of saving the gifs to save space
+    if not save_prediction_as_anim:
+        predictions = np.zeros((1 + num_to_test, 101, 129, 17))
+        predictions[0] = load_data_week_1()
+
+    # Make the iterator depending on whether we need tqdm (progress bar)
     iterator = trange(1, num_to_test, desc = desc, bar_format='{l_bar}{bar:20}{r_bar}{bar:-20b}') if use_progress_bar else range(1, num_to_test)
 
+    # Branch off the save animation processes because they take a long time
+
     for n in iterator:
+        # Set metadata on regressor
+        regressor.set_input_name(f"first {n}")
+
         # Preprocess the data
         inputs, data, train_idx = get_first_n_inputs(n)
 
@@ -71,12 +91,18 @@ def model_test(regressor: Regressor, use_progress_bar = False, num_to_test = 101
             raise e
 
         # Calculate the model and compare with actual data
-        idxs = inputs.reshape((-1, 1))
-        pred = regressor.predict(idxs)
-        pred = pred.reshape((101, 129, 17))
+        pred = regressor.predict(inputs.reshape((-1, 1))).reshape((101, 129, 17))
 
-        # Make and save the animation. This calculates and returns the errors during the process
-        rmse, worst = make_anim_week_2(pred, data, f"{path}/first_{n}.gif", prediction_name = f"{model_name} with first {n} data")
+        # Root mean square error and worst absolute error
+        rmse = np.sqrt(np.mean((data - pred)**2))
+        worst = np.max(np.abs(data - pred))
+
+        if save_prediction_as_anim:
+            # Make and save the animation. This calculates and returns the errors during the process
+            make_anim_week_2(pred, data, rmse, worst, f"{path}/first_{n}.gif", prediction_name = f"{model_name} with first {n} data")
+        else:
+            # Save all the predictions instead of the gifs to save space
+            predictions[n] = pred
 
         # Create the logs
         log = f"{model_name} using the first {n} data: RMSE = {rmse}, worst = {worst}"
@@ -90,14 +116,19 @@ def model_test(regressor: Regressor, use_progress_bar = False, num_to_test = 101
         hist_idxs.append(n)
 
     # Create the file and overwrite as blank if necessary
-    with open(logs_file, 'w') as f:
+    with open(logs_file, 'w', encoding="utf-8") as f:
         f.write(regressor.train_info)
-        f.write("\n")
+        f.write("\n\n\n")
 
+    # Append all the logs
     with open(logs_file, 'a') as f:
         for log in logs:
             f.write(log)
-            f.write("\n\n\n")
+            f.write("\n")
+
+    # Save the predictions array
+    if not save_prediction_as_anim:
+        np.save(f"{path}/predictions.npy", predictions)
 
     # Plot everything
     plt.figure()
@@ -106,11 +137,6 @@ def model_test(regressor: Regressor, use_progress_bar = False, num_to_test = 101
     plt.legend(['RMSE', 'Worst error'])
     plt.title(f"Result prediction using {model_name} from first n data")
     plt.savefig(f"{path}/Predicted {model_name}.png")
-
-def test_anim():
-    _, predicted_data, _ = get_first_n_inputs(10)
-    pred = predicted_data + np.random.random(predicted_data.shape) * 0.01
-    make_anim_week_2(pred, predicted_data, "hiya.gif", "hehehaha predictor with first -1 data")
 
 ############################################
 #### Helper Functions for model testing ####
@@ -121,10 +147,8 @@ def execute_test(model, num_to_test):
     model_test(model, num_to_test=num_to_test, verbose=True, use_progress_bar=False)
 
 # Sequentially/Parallelly(?) train all models and test the results
-def test_all_models(models, sequential):
+def test_all_models(models, sequential, num_to_test=101):
     t = time.time()
-
-    num_to_test = 101
 
     if sequential:
         for model in models:
@@ -163,5 +187,18 @@ def batch_1():
         BayesianRidgeRegression(n_iter=3000, tol = 0.0001),
     ], sequential = False)
 
+def test_save_load():
+    test_all_models([
+        Week1Net1(epochs=30)
+    ], sequential=True, num_to_test=2)
+
+    model = Week1Net1()
+    model.load("./Datas/Week 2/Week 1 Net 1/first 1.pt")
+    inputs = np.arange(101)*0.75/100
+    model.predict(inputs.reshape((-1, 1))).reshape((101, 129, 17))
+
 if __name__ == "__main__":
-    batch_1()
+    test_all_models([
+        Week1Net1(epochs=30)
+    ], sequential=True, num_to_test=5)
+

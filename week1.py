@@ -9,8 +9,6 @@ import numpy as np
 from load import load_data_week_1, wrap_data, make_anim, index_exclude, index_include
 import matplotlib.pyplot as plt
 import time
-import torch
-from torch import nn
 import numpy as np
 import torch.optim as optim
 from tqdm import trange

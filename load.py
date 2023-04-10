@@ -81,11 +81,7 @@ def make_anim(data, path = None):
     else:
         plt.show()
 
-def make_anim_week_2(predicted_data, original_data, path = None, prediction_name = None):
-    # Calculate the error
-    rmse = np.sqrt(np.mean((original_data - predicted_data)**2))
-    worse = np.max(np.abs(original_data - predicted_data))
-
+def make_anim_week_2(predicted_data, original_data, rmse, worse, path = None, prediction_name = None):
     spacing_x = np.load("mesh_data_x.npy")
     spacing_y = np.load("mesh_data_y.npy")
 

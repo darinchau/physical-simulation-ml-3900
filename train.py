@@ -5,9 +5,14 @@ from sklearn.tree import DecisionTreeRegressor as DecisionTree
 import numpy as np
 from abc import abstractmethod as virtual
 from load import index_exclude, index_include
-import warnings
+import torch
+from torch import nn
+from torch.utils.data import TensorDataset, DataLoader
+import torch.optim as optim
+from torchinfo import summary
 
-# Filter all scikitlearn warnings
+# Filter all warnings
+import warnings
 warnings.filterwarnings('ignore')
 
 class Regressor:
@@ -22,6 +27,20 @@ class Regressor:
             raise AttributeError("Regression model has not been trained yet")
         return self._model
 
+    def set_path(self, path):
+        # Sets the path to save whatever produced inside the model
+        self._path = path
+
+    # Sets the name of the input so that stuff is saved with names nicely
+    def set_input_name(self, name):
+        self._input_name = name
+
+    @property
+    def path(self):
+        if not hasattr(self, "_path"):
+            return ""
+        return self._path
+
     @property
     def trained(self):
         return hasattr(self, "_model")
@@ -33,7 +52,7 @@ class Regressor:
     def train_info(self):
         st = f"Trained on {self.model_name} with:"
         for k, v in self.__dict__.items():
-            if k == "_model":
+            if k[0] == "_":
                 continue
             st += f"\n{k} = {str(v)}"
         return st
@@ -59,15 +78,20 @@ class Regressor:
         xtrain, xtest = inputs[train_idx], inputs[test_idx]
         ytrain, ytest = data[train_idx], data[test_idx]
 
-        xtrain = xtrain.reshape(-1, 1)
-        xtest = xtest.reshape(-1, 1)
+        if len(xtrain.shape) == 1:
+            xtrain = xtrain.reshape(-1, 1)
+            xtest = xtest.reshape(-1, 1)
+
+        # Store the number of inputs and outputs just in case we need them
+        self._num_inputs: int = xtrain.shape[1]
+        self._num_outputs: int = ytrain.shape[1]
 
         return xtrain, xtest, ytrain, ytest
 
-    def calculate_error(self, model, xtest, ytest, skip_error, verbose):
+    def calculate_error(self, xtest, ytest, skip_error, verbose):
         # Calculate the error
         if skip_error:
-            return model, None
+            return
 
         # Calculate error
         ypred = self.predict(xtest)
@@ -79,7 +103,7 @@ class Regressor:
         if verbose:
             print(f"{self.model_name} - MSE: {mse}, worse: {worst}")
 
-        return model, (mse, worst)
+        return mse, worst
 
     # Preprocess, fit data, and calculate error
     def fit(self, inputs, raw_data, training_idx, verbose = False, skip_error = False):
@@ -90,10 +114,10 @@ class Regressor:
         np.random.seed(12345)
         model = self.fit_model(xtrain, ytrain)
 
-        # Calculate and return error
-        model, err = self.calculate_error(model, xtest, ytest, skip_error, verbose)
-
         self._model = model
+
+        # Calculate and return error
+        err = self.calculate_error(xtest, ytest, skip_error, verbose)
 
         return err
 
@@ -115,7 +139,7 @@ class GaussianRegression(Regressor):
         return "Gaussian process"
 
 class LinearRegression(Regressor):
-    def fit_model(self, xtrain, ytrain, verbose=False, skip_error=False):
+    def fit_model(self, xtrain, ytrain):
         model =  Linear().fit(xtrain, ytrain)
         return model
 
@@ -218,9 +242,9 @@ class MultipleRegressor(Regressor):
         for i in range(num_tasks):
             models[i] = self.fit_model(xtrain, ytrain[:, i])
 
-        err = self.calculate_error(xtest, ytest, skip_error, verbose)
-
         self._model = models
+
+        err = self.calculate_error(xtest, ytest, skip_error, verbose)
 
         return err
 
@@ -284,4 +308,186 @@ class PassiveAggressiveRegression(MultipleRegressor):
     def model_name(self):
         return "Passive Aggressive Regressor"
 
-#### Neural networks ####
+##################################################################################################################
+#### This defines wrapper classes around Pytorch Neural networks so we hopefully simplify things a little bit ####
+##################################################################################################################
+# Using this class, one must additionally define the init_net method, as well as the model name and training details
+class NeuralNetworkRegressor(Regressor):
+    # path: path to save file for stuff
+    def __init__(self, epochs: int = 50000, show_training_logs = False):
+        self._epochs = epochs
+        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Batch size
+        self._bs = 1
+        self._show_logs = show_training_logs
+
+    # Preprocess, fit data, and calculate error
+    def fit(self, inputs, raw_data, training_idx, verbose = False, skip_error = False):
+        # Set random seed for reproducible result
+        np.random.seed(12345)
+
+        # Split data
+        xtrain, xtest, ytrain, ytest = self.preprocess(inputs, raw_data, training_idx)
+
+        # Wrap everything in dataloaders to prepare for training
+        # Convert numpy arrays to PyTorch tensors and move to device
+        xtrain_tensor = torch.tensor(xtrain).to(self._device).float()
+        xtest_tensor = torch.tensor(xtest).to(self._device).float()
+        ytrain_tensor = torch.tensor(ytrain).to(self._device).float()
+        ytest_tensor = torch.tensor(ytest).to(self._device).float()
+
+        train_dataset = TensorDataset(xtrain_tensor, ytrain_tensor)
+        test_dataset = TensorDataset(xtest_tensor, ytest_tensor)
+        train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+        test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+
+        # Begin the training
+        net = self.init_net().to(self._device)
+        optimizer = optim.SGD(net.parameters(), lr=0.01)
+        criterion = nn.MSELoss()
+        history = []
+
+        # Define the number of epochs to train
+        num_epochs = self._epochs
+
+        # Train the neural network
+        for epoch in range(num_epochs):
+            train_loss = 0.0
+            for batch_idx, (data, target) in enumerate(train_dataloader):
+                # Zero the gradients
+                optimizer.zero_grad()
+
+                # Forward pass
+                output = net(data)
+                loss = criterion(output, target)
+
+                # Backward pass
+                loss.backward()
+
+                # Update the parameters
+                optimizer.step()
+
+                # Accumulate the training loss
+                train_loss += loss.item()
+
+            # Calculate the average training loss
+            train_loss /= len(train_dataloader)
+
+            # Evaluate the neural network on the test set
+            test_loss = 0.0
+            with torch.no_grad():
+                for data, target in test_dataloader:
+                    # Move the data and target to the device
+                    data, target = data, target
+
+                    # Forward pass
+                    output = net(data)
+                    loss = criterion(output, target)
+
+                    # Accumulate the test loss
+                    test_loss += loss.item()
+
+            # Calculate the average test loss
+            test_loss /= len(test_dataloader)
+
+            # Print the epoch and the training and test loss
+            if self._show_logs:
+                print('Epoch [{}/{}], Train Loss: {:.4f}, Test Loss: {:.4f}'.format(epoch+1, num_epochs, train_loss, test_loss))
+
+            # Save the training and test loss for plotting
+            history.append([train_loss, test_loss])
+
+        # Save the training details and history
+        hist = np.array(history)
+        np.save(f"{self.path}/{self.model_name} train history {self._input_name}.npy", hist)
+
+        # Skip saving the model for now
+        self.save(net)
+        self._model = net
+
+        # Calculate error
+        err = self.calculate_error(xtest, ytest, skip_error=skip_error, verbose=verbose)
+
+        return err
+
+    def fit_model(self, xtrain, ytrain):
+        raise NotImplementedError
+
+    @virtual
+    def init_net(self) -> nn.Module:
+        raise NotImplementedError
+
+    def save(self, model: nn.Module):
+        model_scripted = torch.jit.script(model) # Export to TorchScript
+        model_scripted.save(f'{self.path}/{self._input_name}.pt')
+
+    def load(self, path) -> nn.Module:
+        model = torch.jit.load(path)
+        model.eval()
+        self._model = model
+
+    def predict(self, xtest):
+        # Convert xtest to a PyTorch tensor
+        xtest_tensor = torch.tensor(xtest, dtype=torch.float32)
+
+        # Move xtest to the same device as the trained model
+        xtest_tensor = xtest_tensor.to(self._device)
+
+        # Set the model to evaluation mode
+        self.model.eval()
+
+        # Make predictions on xtest
+        with torch.no_grad():
+            ypred_tensor: torch.Tensor = self._model(xtest_tensor)
+
+        # Convert the predicted tensor to a numpy array
+        ypred = ypred_tensor.cpu().numpy()
+
+        return ypred
+
+    # This defines the training details which output the model structure to be outputted in the logs
+    # Feel free to overload this
+    @property
+    def train_info(self):
+        model = self._model
+        nin, nout = self._num_inputs, self._num_outputs
+        model_stat = summary(model, input_size=(self._bs, nin), verbose=0)
+        return f"Trained on {self.model_name} with structure\n\n{model_stat}"
+
+# Now we have abstracted away all the training code and we can define neural network with one nested class only
+class Week1Net1(NeuralNetworkRegressor):
+    def init_net(self) -> nn.Module:
+        nin, nout = self._num_inputs, self._num_outputs
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.fc = nn.Sequential(
+                        nn.Linear(nin, 50),
+                        nn.Linear(50, nout)
+                    )
+
+            def forward(self, x):
+                x = self.fc(x)
+                return x
+
+        return Net()
+
+    @property
+    def model_name(self):
+        return "Week 1 Net 1"
+
+
+# Import antics
+__all__ = [
+    "Regressor",
+    "DecisionTreeRegression",
+    "RidgeCVRegression",
+    "GaussianRegression",
+    "SGDRegression",
+    "PassiveAggressiveRegression",
+    "LinearRegression",
+    "MultiTaskLassoCVRegression",
+    "MultiTaskElasticNetCVRegression",
+    "BayesianRidgeRegression",
+    "Week1Net1"
+]
