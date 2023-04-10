@@ -15,7 +15,7 @@ import numpy as np
 import torch.optim as optim
 from tqdm import trange
 from lazypredict.Supervised import LazyRegressor
-from raw_train import GaussianRegression
+from train import GaussianRegression
 
 # Raw training code
 def train_net(train_loader, test_loader, net, epochs = 5, verbose = False):
