@@ -44,7 +44,7 @@ def model_test(regressor: Regressor,
                num_to_test,
                use_progress_bar = False,
                verbose = False,
-               save_prediction_as_anim=False):
+               save_prediction_as_anim=True):
     # Define history array for plotting
     hist = []
     hist_idxs = []
@@ -74,6 +74,8 @@ def model_test(regressor: Regressor,
     iterator = trange(1, num_to_test, desc = desc, bar_format='{l_bar}{bar:20}{r_bar}{bar:-20b}') if use_progress_bar else range(1, num_to_test)
 
     # Branch off the save animation processes because they take a long time
+    if save_prediction_as_anim:
+        save_anim_processes = []
 
     for n in iterator:
         # Set metadata on regressor
@@ -99,7 +101,9 @@ def model_test(regressor: Regressor,
 
         if save_prediction_as_anim:
             # Make and save the animation. This calculates and returns the errors during the process
-            make_anim_week_2(pred, data, rmse, worst, f"{path}/first_{n}.gif", prediction_name = f"{model_name} with first {n} data")
+            p = Process(target=make_anim_week_2, args=(pred, data, rmse, worst, f"{path}/first_{n}.gif", f"{model_name} with first {n} data"))
+            p.start()
+            save_anim_processes.append(p)
         else:
             # Save all the predictions instead of the gifs to save space
             predictions[n] = pred
@@ -137,6 +141,10 @@ def model_test(regressor: Regressor,
     plt.legend(['RMSE', 'Worst error'])
     plt.title(f"Result prediction using {model_name} from first n data")
     plt.savefig(f"{path}/Predicted {model_name}.png")
+
+    if save_prediction_as_anim:
+        for process in save_anim_processes:
+            process.join()
 
 ############################################
 #### Helper Functions for model testing ####
@@ -199,6 +207,5 @@ def test_save_load():
 
 if __name__ == "__main__":
     test_all_models([
-        Week1Net1(epochs=30)
-    ], sequential=True, num_to_test=5)
-
+        LinearRegression()
+    ], sequential=True, num_to_test=3)

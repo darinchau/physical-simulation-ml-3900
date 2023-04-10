@@ -402,7 +402,7 @@ class NeuralNetworkRegressor(Regressor):
         np.save(f"{self.path}/{self.model_name} train history {self._input_name}.npy", hist)
 
         # Skip saving the model for now
-        self.save(net)
+        # self.save(net)
         self._model = net
 
         # Calculate error
