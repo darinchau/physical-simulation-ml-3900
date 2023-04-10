@@ -3,16 +3,13 @@
 import os
 import shutil
 import time
-from train import train_mlp, train_gaussian_process, lazy_predict
-from load import load_data_week_1, wrap_data, make_anim, index_exclude, index_include, make_anim_week_2
+from load import load_data_week_1, make_anim_week_2
 import numpy as np
-import torch
-from torch import nn
 import matplotlib.pyplot as plt
-from raw_train import Regressor, DecisionTreeRegression, RidgeCVRegression, GaussianRegression, SGDRegression, PassiveAggressiveRegression, LinearRegression, MultiTaskLassoCVRegression, MultiTaskElasticNetCVRegression, BayesianRidgeRegressor
+from train import Regressor, DecisionTreeRegression, RidgeCVRegression, GaussianRegression, SGDRegression, PassiveAggressiveRegression, LinearRegression, MultiTaskLassoCVRegression, MultiTaskElasticNetCVRegression, BayesianRidgeRegression
 from tqdm import trange
 import re
-import multiprocessing
+from multiprocessing import Process
 
 # Returns true if the pattern says the number of splits is ass
 def too_many_split(e: ValueError):
@@ -43,7 +40,7 @@ def get_first_n_inputs(n):
 
 
 # Takes in a regressor and trains the regressor on 1 - 101 samples
-def model_test(regressor: Regressor):
+def model_test(regressor: Regressor, use_progress_bar = False, num_to_test = 101, verbose = False):
     hist = []
     hist_idxs = []
 
@@ -59,7 +56,9 @@ def model_test(regressor: Regressor):
     desc = f"Training {model_name}"
     desc += " " * (45 - len(desc))
 
-    for n in trange(1, 101, desc = desc, bar_format='{l_bar}{bar:20}{r_bar}{bar:-20b}'):
+    iterator = trange(1, num_to_test, desc = desc, bar_format='{l_bar}{bar:20}{r_bar}{bar:-20b}') if use_progress_bar else range(1, num_to_test)
+
+    for n in iterator:
         # Preprocess the data
         inputs, data, train_idx = get_first_n_inputs(n)
 
@@ -82,6 +81,9 @@ def model_test(regressor: Regressor):
         # Create the logs
         log = f"{model_name} using the first {n} data: RMSE = {rmse}, worst = {worst}"
         logs.append(log)
+
+        if verbose:
+            print(log)
 
         # Plot the graph
         hist.append((rmse, worst))
@@ -109,10 +111,49 @@ def test_anim():
     pred = predicted_data + np.random.random(predicted_data.shape) * 0.01
     make_anim_week_2(pred, predicted_data, "hiya.gif", "hehehaha predictor with first -1 data")
 
-if __name__ == "__main__":
+############################################
+#### Helper Functions for model testing ####
+############################################
+
+# For parallel model testing
+def execute_test(model):
+    model_test(model, num_to_test=7, verbose=True)
+
+# Sequentially train all models and test the results
+def test_all_models_sequential(models):
     t = time.time()
 
-    # Define a list of model instances to test
+    for model in models:
+        execute_test(model, use_progress_bar=True)
+
+    print(f"Total time taken sequential: {round(time.time() - t, 3)}")
+
+# Define a function to execute the model_test function in parallel
+def test_all_models_parallel(models):
+    t = time.time()
+    processes: list[Process] = []
+    for model in models:
+        p = Process(target=execute_test, args=[model])
+        p.start()
+        processes.append(p)
+    for p in processes:
+        p.join()
+    print(f"Total time taken parallel: {round(time.time() - t, 3)}")
+
+def data_batch_1():
+    test_all_models_sequential([
+        DecisionTreeRegression(),
+        RidgeCVRegression(),
+        GaussianRegression(),
+        SGDRegression(),
+        PassiveAggressiveRegression(),
+        LinearRegression(),
+        MultiTaskLassoCVRegression(),
+        MultiTaskElasticNetCVRegression(),
+        BayesianRidgeRegression()
+    ])
+
+if __name__ == "__main__":
     models = [
         DecisionTreeRegression(),
         RidgeCVRegression(),
@@ -122,23 +163,8 @@ if __name__ == "__main__":
         LinearRegression(),
         MultiTaskLassoCVRegression(),
         MultiTaskElasticNetCVRegression(),
-        BayesianRidgeRegressor()
+        BayesianRidgeRegression()
     ]
 
-    # # Define a function to execute the model_test function in parallel
-    # def parallel_execution(model):
-    #     model_test(model)
-
-    # # Create a multiprocessing pool with the number of cores available
-    # pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
-
-    # # Use the pool to execute the function in parallel for each model
-    # results = pool.map(parallel_execution, models)
-
-    # # Close the pool to free up resources
-    # pool.close()
-
-    for model in models:
-        model_test(model)
-
-    print(f"Total time taken: {round(time.time() - t, 3)}")
+    test_all_models_parallel(models)
+    test_all_models_sequential(models)
