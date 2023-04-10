@@ -5,6 +5,7 @@ from matplotlib.colors import Normalize
 from matplotlib import animation
 import torch
 from torch.utils.data import Dataset, DataLoader
+from math import ceil
 
 # Input a numpy array and a tuple and indexes everything in the indices of that tuple. May messes up order.
 def index_include(data, include):
@@ -86,55 +87,62 @@ def make_anim_week_2(predicted_data, original_data, path = None, prediction_name
     x, y = np.meshgrid(spacing_x, spacing_y)
 
     # Set up figure and axis for animation
-    fig, axes = plt.subplots(4, 2, gridspec_kw={'height_ratios': [4, 4, 4, 1], 'width_ratios': [7, 1]})
+    fig, axes = plt.subplots(4, 1, gridspec_kw={'height_ratios': [5, 5, 5, 1]})
 
     # Figure title
     fig.suptitle(f"Results from {str(prediction_name)}")
 
-    # First Color bar ranges for data and predicted heatmap
+    # First Color bar ranges for data and predicted heatmap to normalize the cbar for data and prediction
     vmin = min(np.min(original_data), np.min(predicted_data))
     vmax = min(np.max(original_data), np.max(predicted_data))
 
-    # Ax 00 corresponds to the prediction and the data
-    axes[0][0].set_aspect("equal", adjustable="box")
-    axes[0][0].set_xlabel("X")
-    axes[0][0].set_ylabel("Y", va="bottom")
-    axes[0][0].set_title(f"Original data")
-    axes[0][0].set_yticks([])
-    data_heatmap = axes[0][0].pcolormesh(x, y, np.transpose(original_data[0]), cmap="hot", vmin=vmin, vmax=vmax)
+    # Ax 0 corresponds to the prediction and the data
+    axes[0].set_aspect("equal", adjustable="box")
+    axes[0].set_xlabel("X")
+    axes[0].set_ylabel("Y", va="bottom")
+    axes[0].set_title(f"Original data")
+    axes[0].set_yticks([])
+    data_heatmap = axes[0].pcolormesh(x, y, np.transpose(original_data[0]), cmap="hot", vmin=vmin, vmax=vmax)
 
-    # Ax 10 for prediction
-    axes[1][0].set_aspect("equal", adjustable="box")
-    axes[1][0].set_xlabel("X")
-    axes[1][0].set_ylabel("Y", va="bottom")
-    axes[1][0].set_title(f"Predicted data")
-    axes[1][0].set_yticks([])
-    pred_heatmap = axes[1][0].pcolormesh(x, y, np.transpose(predicted_data[0]), cmap="hot", vmin=vmin, vmax=vmax)
+    # error colorbar
+    cbar0 = fig.colorbar(data_heatmap, ax=axes[0])
+    cbar0.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
+    tk0 = np.round(np.linspace(vmin, vmax, 4, endpoint=True), 2)
+    cbar0.set_ticks(tk0)
 
-    # Ax 1 for the data/prediction colorbar
-    ax1 = [axes[0][1], axes[1][1]]
-    cbar1 = Colorbar(ax1, cmap='hot', norm=Normalize(vmin=vmin, vmax=vmax))
+    # Ax 1 for prediction
+    axes[1].set_aspect("equal", adjustable="box")
+    axes[1].set_xlabel("X")
+    axes[1].set_ylabel("Y", va="bottom")
+    axes[1].set_title(f"Predicted data")
+    axes[1].set_yticks([])
+    pred_heatmap = axes[1].pcolormesh(x, y, np.transpose(predicted_data[0]), cmap="hot", vmin=vmin, vmax=vmax)
+
+    # error colorbar
+    cbar1 = fig.colorbar(pred_heatmap, ax=axes[1])
     cbar1.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
+    cbar1.set_ticks(tk0)
 
-    # Ax 2- corresponds to the errors
+    # Ax 2 corresponds to the errors
     error = np.abs(predicted_data - original_data)
-    axes[2][0].set_aspect("equal", adjustable="box")
-    axes[2][0].set_xlabel("X")
-    axes[2][0].set_ylabel("Y", va="bottom")
-    axes[2][0].set_title(f"Error plot")
-    axes[2][0].set_yticks([])
-    err_heatmap = axes[2][0].pcolormesh(x, y, np.transpose(error[0]), cmap="hot", vmin=0, vmax=np.max(error))
+    axes[2].set_aspect("equal", adjustable="box")
+    axes[2].set_xlabel("X")
+    axes[2].set_ylabel("Y", va="bottom")
+    axes[2].set_title(f"Error plot")
+    axes[2].set_yticks([])
+    err_heatmap = axes[2].pcolormesh(x, y, np.transpose(error[0]), cmap="hot", vmin=0, vmax=np.max(error))
 
-    # Ax 21 for the error colorbar
-    cbar2 = Colorbar(axes[2][0], err_heatmap)
+    # error colorbar. Set number of rounding decimals to one less than the order of magnitude
+    cbar2 = fig.colorbar(err_heatmap, ax=axes[2])
     cbar2.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
+    num_decimals = -ceil(np.log10(np.max(error))) + 1
+    print(num_decimals)
+    tk2 = np.round(np.linspace(0, np.max(error), 4, endpoint=True), num_decimals)
+    cbar2.set_ticks(tk2)
 
     # Ax 3 is used purely to display error bounds information
-    axes[3][0].text(0, 0.5, f"RMSE Error = {rmse}, Worst error = {worse}", ha="left", va="center", fontsize=9)
-    axes[3][0].set_axis_off()
-
-    # Unused last axis
-    axes[3][1].set_axis_off()
+    axes[3].text(0, 0.5, f"RMSE Error = {rmse}, Worst error = {worse}", ha="left", va="center", fontsize=9)
+    axes[3].set_axis_off()
 
     # Define update function for animation
     def update(frame):
