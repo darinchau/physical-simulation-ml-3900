@@ -136,7 +136,6 @@ def make_anim_week_2(predicted_data, original_data, path = None, prediction_name
     cbar2 = fig.colorbar(err_heatmap, ax=axes[2])
     cbar2.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
     num_decimals = -ceil(np.log10(np.max(error))) + 1
-    print(num_decimals)
     tk2 = np.round(np.linspace(0, np.max(error), 4, endpoint=True), num_decimals)
     cbar2.set_ticks(tk2)
 

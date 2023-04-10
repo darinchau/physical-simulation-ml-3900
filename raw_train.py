@@ -258,7 +258,7 @@ class SGDRegression(MultipleRegressor):
 
     @property
     def model_name(self):
-        return "Stochastic Gradient Descent Regressor"
+        return "SGD Regressor"
 
 class PassiveAggressiveRegression(MultipleRegressor):
     def __init__(self, C=1.0, fit_intercept=True, max_iter=10000, tol=1e-6):

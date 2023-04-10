@@ -56,7 +56,10 @@ def model_test(regressor: Regressor):
 
     logs = []
 
-    for n in trange(1, 101, desc = f"Training {model_name}", bar_format='{l_bar}{bar:20}{r_bar}{bar:-20b}'):
+    desc = f"Training {model_name}"
+    desc += " " * (45 - len(desc))
+
+    for n in trange(1, 101, desc = desc, bar_format='{l_bar}{bar:20}{r_bar}{bar:-20b}'):
         # Preprocess the data
         inputs, data, train_idx = get_first_n_inputs(n)
 
