@@ -74,19 +74,26 @@ def make_anim(data, path = None):
         plt.show()
 
 def make_anim_week_2(predicted_data, original_data, path = None, prediction_name = None):
+    # Calculate the error
+    rmse = np.sqrt(np.mean((original_data - predicted_data)**2))
+    worse = np.max(np.abs(original_data - predicted_data))
+
     spacing_x = np.load("mesh_data_x.npy")
     spacing_y = np.load("mesh_data_y.npy")
 
     x, y = np.meshgrid(spacing_x, spacing_y)
 
     # Set up figure and axis for animation
-    fig, (ax1, ax2) = plt.subplots(2, 1)
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, gridspec_kw={'height_ratios': [4, 4, 1]})
+
+    # Figure title
+    fig.suptitle(f"Results from {str(prediction_name)}")
 
     # Ax 1 corresponds to the prediction
     ax1.set_aspect("equal", adjustable="box")
     ax1.set_xlabel("X")
     ax1.set_ylabel("Y", va="bottom")
-    ax1.set_title(f"Predicted data using {str(prediction_name)}")
+    ax1.set_title(f"Predicted data")
     ax1.set_yticks([])
     pred_heatmap = ax1.pcolormesh(x, y, np.transpose(predicted_data[0]), cmap="hot", vmin=np.min(predicted_data), vmax=np.max(predicted_data))
 
@@ -105,6 +112,10 @@ def make_anim_week_2(predicted_data, original_data, path = None, prediction_name
     cbar = ax2.figure.colorbar(err_heatmap, ax=ax2)
     cbar.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
 
+    # Ax 3 is used purely to display error bounds information
+    ax3.text(0, 0.5, f"RMSE Error = {rmse}, Worst error = {worse}", ha="left", va="center", fontsize=9)
+    ax3.set_axis_off()
+
     # Define update function for animation
     def update(frame):
         pred_heatmap.set_array(np.transpose(predicted_data[frame]))
@@ -114,6 +125,8 @@ def make_anim_week_2(predicted_data, original_data, path = None, prediction_name
     # Create animation object and display it
     anim = animation.FuncAnimation(fig, update, frames=predicted_data.shape[0], interval=50, blit=True)
 
+    plt.tight_layout()
+
     if path is not None:
         writergif = animation.PillowWriter(fps=30)
         anim.save(path, writer=writergif)
@@ -121,3 +134,5 @@ def make_anim_week_2(predicted_data, original_data, path = None, prediction_name
         plt.show()
 
     plt.close("all")
+
+    return rmse, worse

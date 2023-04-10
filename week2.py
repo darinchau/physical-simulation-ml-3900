@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from raw_train import Regressor, DecisionTreeRegression, RidgeCVRegression, GaussianRegression, SGDRegression, PassiveAggressiveRegression, LinearRegression, MultiTaskLassoCVRegression, MultiTaskElasticNetCVRegression, BayesianRidgeRegressor
 from tqdm import trange
 import re
+import multiprocessing
 
 # Returns true if the pattern says the number of splits is ass
 def too_many_split(e: ValueError):
@@ -72,19 +73,15 @@ def model_test(regressor: Regressor):
         pred = regressor.predict(idxs)
         pred = pred.reshape((101, 129, 17))
 
-        # Make and save the animation
-        make_anim_week_2(pred, f"{path}/first_{n}.gif")
-
-        # Calculate the error
-        rmse = np.sqrt(np.mean((data - pred)**2))
-        worse = np.max(np.abs(data - pred))
+        # Make and save the animation. This calculates and returns the errors during the process
+        rmse, worst = make_anim_week_2(pred, data, f"{path}/first_{n}.gif", prediction_name = f"{model_name} with first {n} data")
 
         # Create the logs
-        log = f"{model_name} using the first {n} data: RMSE = {rmse}, worst = {worse}"
+        log = f"{model_name} using the first {n} data: RMSE = {rmse}, worst = {worst}"
         logs.append(log)
 
         # Plot the graph
-        hist.append((rmse, worse))
+        hist.append((rmse, worst))
         hist_idxs.append(n)
 
     # Create the file and overwrite as blank if necessary
@@ -104,19 +101,41 @@ def model_test(regressor: Regressor):
     plt.title(f"Result prediction using {model_name} from first n data")
     plt.savefig(f"{path}/Predicted {model_name}.png")
 
-if __name__ == "__main__":
-    # t = time.time()
-    # model_test(RidgeCVRegression())
-    # model_test(GaussianRegression())
-    # model_test(LinearRegression())
-    # model_test(MultiTaskLassoCVRegression())
-    # model_test(MultiTaskElasticNetCVRegression())
-    # model_test(DecisionTreeRegression())
-    # model_test(SGDRegression())
-    # model_test(BayesianRidgeRegressor())
-    # model_test(PassiveAggressiveRegression())
-    # print(f"Total time taken: {round(time.time() - t, 3)}")
-
+def test_anim():
     _, predicted_data, _ = get_first_n_inputs(10)
     pred = predicted_data + np.random.random(predicted_data.shape) * 0.01
-    make_anim_week_2(pred, predicted_data, "hiya.gif")
+    make_anim_week_2(pred, predicted_data, "hiya.gif", "hehehaha predictor with first -1 data")
+
+if __name__ == "__main__":
+    t = time.time()
+
+    # Define a list of model instances to test
+    models = [
+        DecisionTreeRegression(),
+        RidgeCVRegression(),
+        GaussianRegression(),
+        SGDRegression(),
+        PassiveAggressiveRegression(),
+        LinearRegression(),
+        MultiTaskLassoCVRegression(),
+        MultiTaskElasticNetCVRegression(),
+        BayesianRidgeRegressor()
+    ]
+
+    # # Define a function to execute the model_test function in parallel
+    # def parallel_execution(model):
+    #     model_test(model)
+
+    # # Create a multiprocessing pool with the number of cores available
+    # pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+
+    # # Use the pool to execute the function in parallel for each model
+    # results = pool.map(parallel_execution, models)
+
+    # # Close the pool to free up resources
+    # pool.close()
+
+    for model in models:
+        model_test(model)
+
+    print(f"Total time taken: {round(time.time() - t, 3)}")
