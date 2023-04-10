@@ -70,7 +70,7 @@ class Regressor:
             return model, None
 
         # Calculate error
-        ypred = model.predict(xtest)
+        ypred = self.predict(xtest)
 
         # Calculate the mean square error
         mse = np.mean((ytest - ypred)**2)
@@ -202,13 +202,6 @@ class DecisionTreeRegression(Regressor):
 #### and make them predict multiple features by making them predict single features independently and separately ####
 #####################################################################################################################
 class MultipleRegressor(Regressor):
-    # Overload the error calculation because we are too lazy to implement
-    def calculate_error(self, xtest, ytest, skip_error, verbose):
-        if skip_error:
-            return None
-
-        raise NotImplementedError
-
     # Preprocess, fit data, and calculate error
     def fit(self, inputs, raw_data, training_idx, verbose = False, skip_error = False):
         # Split data
@@ -290,3 +283,5 @@ class PassiveAggressiveRegression(MultipleRegressor):
     @property
     def model_name(self):
         return "Passive Aggressive Regressor"
+
+#### Neural networks ####
