@@ -555,6 +555,41 @@ class Week2Net2(NeuralNetworkRegressor):
     def model_name(self):
         return "Week 2 Net 2"
 
+class Week2Net3(NeuralNetworkRegressor):
+    def init_net(self) -> nn.Module:
+        l, r = 38, 38
+        m = 129-l-r
+
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.left = nn.Sequential(
+                        nn.Linear(1, 10),
+                        nn.Linear(10, l*17),
+                    )
+                self.middle = nn.Sequential(
+                    nn.Linear(1, 10),
+                    nn.Linear(10, 25),
+                    nn.Linear(25, m*17)
+                )
+                self.right = nn.Sequential(
+                        nn.Linear(1, 10),
+                        nn.Linear(10, r*17),
+                    )
+
+            def forward(self, x):
+                left = self.left(x).reshape((-1, l, 17))
+                mid = self.middle(x).reshape((-1, m, 17))
+                right = self.right(x).reshape((-1, r, 17))
+                res = torch.cat([left, mid, right], dim = 1).reshape((-1, 1, 2193))
+                return res
+
+        return Net()
+
+    @property
+    def model_name(self):
+        return "Week 2 Net 3"
+
 
 # Import antics
 __all__ = [
@@ -570,5 +605,6 @@ __all__ = [
     "BayesianRidgeRegression",
     "Week1Net1",
     "Week2Net1",
-    "Week2Net2"
+    "Week2Net2",
+    "Week2Net3"
 ]

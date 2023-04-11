@@ -207,9 +207,15 @@ def test_save_load():
     inputs = np.arange(101)*0.75/100
     model.predict(inputs.reshape((-1, 1))).reshape((101, 129, 17))
 
-if __name__ == "__main__":
+def batch_2():
     test_all_models([
         Week1Net1(epochs=(600, 250), show_training_logs=True),
         Week2Net1(epochs=(600, 250), show_training_logs=True),
         Week2Net2(epochs=(600, 250), show_training_logs=True),
+        Week2Net2(epochs=(100, 250), show_training_logs=True),
     ], sequential=False, num_to_test=30, pbar=False)
+
+if __name__ == "__main__":
+    test_all_models([
+        Week2Net3(epochs=(250, 250), show_training_logs=True),
+    ], sequential=True, num_to_test=20, pbar=False)
