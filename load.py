@@ -7,6 +7,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from math import ceil
 import subprocess
+from numpy.typing import NDArray
+import h5py
 
 def optimize_gif(path):
     # Uses the gifsicle library
@@ -166,3 +168,37 @@ def make_anim_week_2(predicted_data, original_data, rmse, worse, path = None, pr
     plt.close("all")
 
     return rmse, worse
+
+
+### Save and load h5 files
+def save_h5(d: dict[str, NDArray], path: str):
+    # Open an HDF5 file in write mode
+    with h5py.File(path, 'w') as f:
+
+        # Enable compression with gzip and set compression level to 6
+        f.attrs.create('compression', 'gzip')
+        f.attrs.create('compression_level', 6)
+
+        # Loop through dictionary keys and add them as groups to the file
+        for key in d.keys():
+            group = f.create_group(key)
+
+            # Add the numpy array value to the group and enable compression
+            dataset = group.create_dataset('data', data=d[key])
+            dataset.attrs.create('compression', 'gzip')
+            dataset.attrs.create('compression_level', 6)
+
+def peek_h5(path: str):
+    with h5py.File(path, 'r') as f:
+        # Loop through keys of the file and print them
+        for key in f.keys():
+            print(key)
+            group = f[key]
+
+            # Loop through keys of the group and print them
+            for subkey in group.keys():
+                print('\t', subkey)
+                dataset = group[subkey]
+
+                # Print the shape and first element of the dataset
+                print('\t\t', dataset.shape)

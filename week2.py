@@ -3,13 +3,14 @@
 import os
 import shutil
 import time
-from load import load_data_week_1, make_anim_week_2
+from load import load_data_week_1, make_anim_week_2, save_h5, peek_h5
 import numpy as np
 import matplotlib.pyplot as plt
 from train import *
-from tqdm import trange
+from tqdm import tqdm
 import re
 from multiprocessing import Process
+from typing import Iterable
 
 # Returns true if the pattern says the number of splits is ass
 def too_many_split(e: ValueError):
@@ -40,11 +41,11 @@ def get_first_n_inputs(n):
 
 
 # Takes in a regressor and trains the regressor on 1 - 101 samples
+# to_test: An iterator of numbers for the "n" in first n data
 def model_test(regressor: Regressor,
-               num_to_test,
+               to_test: Iterable[int],
                use_progress_bar = False,
-               verbose = False,
-               save_prediction_as_anim=True):
+               verbose = False):
     # Define history array for plotting
     hist = []
     hist_idxs = []
@@ -65,19 +66,20 @@ def model_test(regressor: Regressor,
     desc = f"Training {model_name}"
     desc += " " * (45 - len(desc))
 
-    # Save all the predictions instead of saving the gifs to save space
-    if not save_prediction_as_anim:
-        predictions = np.zeros((1 + num_to_test, 101, 129, 17))
-        predictions[0] = load_data_week_1()
+    # Save all the predictions to generate gif later
+    predictions = {}
+    predictions["original"] = load_data_week_1()
 
     # Make the iterator depending on whether we need tqdm (progress bar)
-    iterator = trange(1, num_to_test, desc = desc, bar_format='{l_bar}{bar:20}{r_bar}{bar:-20b}') if use_progress_bar else range(1, num_to_test)
+    if use_progress_bar:
+        # Length of progress bar
+        bar_length = 20
+        to_test = tqdm(to_test, desc = desc, bar_format=f"{{l_bar}}{{bar:{bar_length}}}{{r_bar}}{{bar:-{bar_length}b}}")
 
-    # Branch off the save animation processes because they take a long time
-    if save_prediction_as_anim:
-        save_anim_processes = []
+    # Branch off the save animation processes using multiprocessing because they take a long time
+    save_anim_processes = []
 
-    for n in iterator:
+    for n in to_test:
         # Set metadata on regressor
         regressor.set_input_name(f"first {n}")
 
@@ -95,56 +97,74 @@ def model_test(regressor: Regressor,
         # Calculate the model and compare with actual data
         pred = regressor.predict(inputs.reshape((-1, 1))).reshape((101, 129, 17))
 
-        # Root mean square error and worst absolute error
+        # Calculate errors :) In order is: RMSE, worst over all data, RMSE for last 10
         rmse = np.sqrt(np.mean((data - pred)**2))
         worst = np.max(np.abs(data - pred))
+        rmse_last_10 = np.sqrt(np.mean((data[-10:] - pred[-10:])**2))
 
-        if save_prediction_as_anim:
-            # Make and save the animation. This calculates and returns the errors during the process
-            p = Process(target=make_anim_week_2, args=(pred, data, rmse, worst, f"{path}/first_{n}.gif", f"{model_name} with first {n} data"))
-            p.start()
-            save_anim_processes.append(p)
-        else:
-            # Save all the predictions instead of the gifs to save space
-            predictions[n] = pred
+        # Save the historical data to plot the graph
+        hist.append((rmse, worst, rmse_last_10))
+        hist_idxs.append(n)
+
+        # Make and save the animation using multiprocessing
+        p = Process(target=make_anim_week_2, args=(pred, data, rmse, worst, f"{path}/first_{n}.gif", f"{model_name} with first {n} data"))
+        p.start()
+        save_anim_processes.append(p)
+
+        # Save all the predictions
+        predictions[f"frame {n}"] = pred
 
         # Create the logs
         log = f"{model_name} using the first {n} data: RMSE = {rmse}, worst = {worst}"
         logs.append(log)
 
+        # Print the logs if necessary
         if verbose:
             print(log)
 
-        # Plot the graph
-        hist.append((rmse, worst))
-        hist_idxs.append(n)
-
     # Create the file and overwrite as blank if necessary
-    with open(logs_file, 'w', encoding="utf-8") as f:
+    with open(logs_file, "w", encoding="utf-8") as f:
         f.write(regressor.train_info)
         f.write("\n\n\n")
 
     # Append all the logs
-    with open(logs_file, 'a') as f:
+    with open(logs_file, "a") as f:
         for log in logs:
             f.write(log)
             f.write("\n")
 
-    # Save the predictions array
-    if not save_prediction_as_anim:
-        np.save(f"{path}/predictions.npy", predictions)
+    # Save the predictions
+    # THe predictions dict should be saved as this format:
+    # frame 1
+    #     data
+    #         (101, 129, 17)
+    # frame 2
+    #     data
+    #         (101, 129, 17)
+    # frame 3
+    #     data
+    #         (101, 129, 17)
+    # frame 4
+    #     data
+    #         (101, 129, 17)
+    # ... ...
+    # original
+    #     data
+    #         (101, 129, 17)
+    # Open an HDF5 file in write mode
+    save_h5(predictions, f"{path}/predictions.h5")
 
-    # Plot everything
+    # Plot everything using matplotlib
     plt.figure()
     plt.plot(hist_idxs, hist)
-    plt.yscale('log')
-    plt.legend(['RMSE', 'Worst error'])
+    plt.yscale("log")
+    plt.legend(["RMSE", "Worst error", "RMSE for last 10"])
     plt.title(f"Result prediction using {model_name} from first n data")
     plt.savefig(f"{path}/Predicted {model_name}.png")
 
-    if save_prediction_as_anim:
-        for process in save_anim_processes:
-            process.join()
+    # Join back the animation saving processes
+    for process in save_anim_processes:
+        process.join()
 
 ############################################
 #### Helper Functions for model testing ####
@@ -152,21 +172,21 @@ def model_test(regressor: Regressor,
 
 # For parallel model testing
 def execute_test(model, num_to_test):
-    model_test(model, num_to_test=num_to_test, verbose=True, use_progress_bar=False)
+    model_test(model, to_test=num_to_test, verbose=True, use_progress_bar=False)
 
 # Sequentially/Parallelly(?) train all models and test the results
 # calculates using the first num_to_test results
 # if sequential, show progress bar if pbar
-def test_all_models(models, sequential, num_to_test=101, pbar=False):
+def test_all_models(models, sequential, to_test, pbar=False):
     t = time.time()
 
     if sequential:
         for model in models:
-            model_test(model, num_to_test=num_to_test, verbose=False, use_progress_bar=pbar)
+            model_test(model, to_test, verbose=False, use_progress_bar=pbar)
     else:
         processes: list[Process] = []
         for model in models:
-            p = Process(target=execute_test, args=(model, num_to_test))
+            p = Process(target=execute_test, args=(model, to_test))
             p.start()
             processes.append(p)
         for p in processes:
@@ -195,27 +215,18 @@ def batch_1():
         MultiTaskElasticNetCVRegression(l1_ratio=0.99),
         BayesianRidgeRegression(n_iter=300),
         BayesianRidgeRegression(n_iter=3000, tol = 0.0001),
-    ], sequential = False)
-
-def test_save_load():
-    test_all_models([
-        Week1Net1(epochs=30)
-    ], sequential=True, num_to_test=2)
-
-    model = Week1Net1()
-    model.load("./Datas/Week 2/Week 1 Net 1/first 1.pt")
-    inputs = np.arange(101)*0.75/100
-    model.predict(inputs.reshape((-1, 1))).reshape((101, 129, 17))
+    ], sequential = False, to_test = range(1, 91))
 
 def batch_2():
     test_all_models([
-        Week1Net1(epochs=(600, 250), show_training_logs=True),
-        Week2Net1(epochs=(600, 250), show_training_logs=True),
-        Week2Net2(epochs=(600, 250), show_training_logs=True),
-        Week2Net2(epochs=(100, 250), show_training_logs=True),
-    ], sequential=False, num_to_test=30, pbar=False)
+        Week1Net1(show_training_logs=True),
+        Week2Net1(show_training_logs=True),
+        Week2Net2(show_training_logs=True),
+        Week2Net2(show_training_logs=True),
+        Week2Net3(show_training_logs=True),
+    ], sequential=False, to_test=(1, 3, 5, 8, 10, 15, 20, 30, 40, 60, 75, 90), pbar=False)
 
 if __name__ == "__main__":
     test_all_models([
-        Week2Net3(epochs=(250, 250), show_training_logs=True),
-    ], sequential=True, num_to_test=20, pbar=False)
+        Week1Net1(show_training_logs=True),
+    ], sequential = True, to_test = range(1, 5))
