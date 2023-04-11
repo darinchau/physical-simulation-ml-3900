@@ -1,5 +1,6 @@
 ## This module is code from week one. We try to keep everything outside
 
+import sys
 import os
 import shutil
 import time
@@ -206,6 +207,10 @@ def batch_1():
         SGDRegression(l1_ratio=0.99),
         PassiveAggressiveRegression(),
         PassiveAggressiveRegression(C = 0.1, max_iter=1000000),
+    ], sequential = False, to_test = range(1, 91))
+
+def batch_2():
+    test_all_models([
         LinearRegression(),
         MultiTaskLassoCVRegression(),
         MultiTaskElasticNetCVRegression(l1_ratio=0.01),
@@ -217,16 +222,20 @@ def batch_1():
         BayesianRidgeRegression(n_iter=3000, tol = 0.0001),
     ], sequential = False, to_test = range(1, 91))
 
-def batch_2():
+
+def batch_3():
+    tt = (1, 3, 5, 8, 10, 15, 20, 30, 40, 50, 60, 75, 90)
     test_all_models([
-        Week1Net1(show_training_logs=True),
-        Week2Net1(show_training_logs=True),
-        Week2Net2(show_training_logs=True),
-        Week2Net2(show_training_logs=True),
-        Week2Net3(show_training_logs=True),
-    ], sequential=False, to_test=(1, 3, 5, 8, 10, 15, 20, 30, 40, 60, 75, 90), pbar=False)
+        # Week1Net1(epochs = (600, 250), show_training_logs=True),
+        # Week2Net1(epochs = (600, 250), show_training_logs=True),
+        Week2Net2(epochs = (600, 10), show_training_logs=True),
+        # Week2Net3(epochs = (600, 250), show_training_logs=True),
+    ], sequential=False, to_test=(1, 3), pbar=False)
 
 if __name__ == "__main__":
-    test_all_models([
-        Week1Net1(show_training_logs=True),
-    ], sequential = True, to_test = range(1, 5))
+    if sys.argv[1] == 'batch1':
+        batch_1()
+    elif sys.argv[1] == 'batch2':
+        batch_2()
+    elif sys.argv[1] == 'batch3':
+        batch_3()

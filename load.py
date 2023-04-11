@@ -90,7 +90,7 @@ def make_anim_week_2(predicted_data, original_data, rmse, worse, path = None, pr
     x, y = np.meshgrid(spacing_x, spacing_y)
 
     # Set up figure and axis for animation
-    fig, axes = plt.subplots(4, 1, gridspec_kw={'height_ratios': [5, 5, 5, 1]})
+    fig, axes = plt.subplots(5, 1, gridspec_kw={'height_ratios': [5, 5, 5, 1, 1]})
 
     # Figure title
     fig.suptitle(f"Results from {str(prediction_name)}")
@@ -146,12 +146,18 @@ def make_anim_week_2(predicted_data, original_data, rmse, worse, path = None, pr
     axes[3].text(0, 0.5, f"RMSE Error = {rmse}, Worst error = {worse}", ha="left", va="center", fontsize=9)
     axes[3].set_axis_off()
 
+    # Ax 4 is used to display the frame number
+    frame_nr = axes[4].text(0, 0.5, f"Frame 0 - 0V", ha="left", va="center", fontsize=9)
+    axes[4].set_axis_off()
+
     # Define update function for animation
     def update(frame):
         data_heatmap.set_array(np.transpose(original_data[frame]))
         pred_heatmap.set_array(np.transpose(predicted_data[frame]))
         err_heatmap.set_array(np.transpose(error[frame]))
-        return pred_heatmap, err_heatmap
+        # The rounding is needed otherwise floating point antics makes everything look horrible
+        frame_nr.set_text(f"Frame {frame} - {round(frame*0.0075, 4)}V")
+        return data_heatmap, pred_heatmap, err_heatmap, frame_nr
 
     # Create animation object and display it
     anim = animation.FuncAnimation(fig, update, frames=predicted_data.shape[0], interval=50, blit=True)
@@ -159,15 +165,13 @@ def make_anim_week_2(predicted_data, original_data, rmse, worse, path = None, pr
     plt.tight_layout()
 
     if path is not None:
-        writergif = animation.PillowWriter(fps=30)
+        writergif = animation.PillowWriter(fps=20)
         anim.save(path, writer=writergif)
         optimize_gif(path)
     else:
         plt.show()
 
     plt.close("all")
-
-    return rmse, worse
 
 
 ### Save and load h5 files

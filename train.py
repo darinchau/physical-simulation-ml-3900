@@ -12,6 +12,7 @@ import torch.optim as optim
 from torchinfo import summary
 import time
 import matplotlib.pyplot as plt
+from math import log
 
 # Filter all warnings
 import warnings
@@ -313,15 +314,61 @@ class PassiveAggressiveRegression(MultipleRegressor):
 ##################################################################################################################
 #### This defines wrapper classes around Pytorch Neural networks so we hopefully simplify things a little bit ####
 ##################################################################################################################
+
+# Helper function to determine whether to stop training or not
+# Stop training if derivative says that the function is flat, or train/test error deviates too much
+USE_LAST_N = 5
+def should_exit_early(train_last_, test_last_):
+    # Return some madeup value to not trigger stuff
+    if len(test_last_) < USE_LAST_N:
+        return False
+
+    if len(test_last_) > USE_LAST_N:
+        print("Wrong indexing!")
+        return True
+
+    # First derivative
+    window_size = 3
+
+    first_ds = []
+    second_ds = []
+    h = 0.01
+
+    for i in range(USE_LAST_N - window_size + 1):
+        # Estimates f'(b)
+        a, b, c = test_last_[i: i + window_size]
+        f_prime_b = (c - a) / (2*h)
+        fpp_b = (a + c - 2*b)/h/h
+        first_ds.append(f_prime_b)
+        second_ds.append(fpp_b)
+
+    fp = sum(first_ds)/(USE_LAST_N-window_size+1)
+    sp = sum(second_ds)/(USE_LAST_N-window_size+1)
+
+    if abs(fp) < 0.005 and abs(sp) < 0.005:
+        return True
+
+    for tr, te in zip(train_last_, test_last_):
+        if tr > te:
+            return False
+        if abs(log(te) - log(tr)) < 0.5:
+            return False
+
+    return True
+
 # Using this class, one must additionally define the init_net method, as well as the model name and training details
 class NeuralNetworkRegressor(Regressor):
     # path: path to save file for stuff
-    def __init__(self, epochs: tuple[int, int] = (100, 500), show_training_logs = False):
+    # epochs: first number is number of tests to be performed, second number is number of trainings per test
+    # if first number is set to -1, then we check the first and second derivarive of the last 10 test outcome to
+    # determine whether we should stop training
+    def __init__(self, epochs: tuple[int, int] = (100, 250), show_training_logs = False):
         self._epochs = epochs
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # Batch size
         self._bs = 1
         self._show_logs = show_training_logs
+
 
     # Preprocess, fit data, and calculate error
     def fit(self, inputs, raw_data, training_idx, verbose = False, skip_error = False):
@@ -352,16 +399,18 @@ class NeuralNetworkRegressor(Regressor):
             'train_x': [],
             'train_y': [],
             'test_x': [],
-            'test_y': []
+            'test_y': [],
+            'test_y_train_loss': []
         }
 
         # Define the number of epochs to train
         num_epochs, num_training_per_epoch = self._epochs
 
         num_trains = 0
+        epoch = 0
 
         # Train the neural network
-        for epoch in range(num_epochs):
+        while True:
             for _ in range(num_training_per_epoch):
                 train_loss = 0.0
                 for batch_idx, (data, target) in enumerate(train_dataloader):
@@ -412,9 +461,23 @@ class NeuralNetworkRegressor(Regressor):
             # Save the training and test loss for plotting
             history['test_x'].append(num_trains)
             history['test_y'].append(test_loss)
+            history['test_y_train_loss'].append(history['train_y'][-1])
 
+            # Incerement number of epochs
+            epoch += 1
+
+            # Print logs
             if self._show_logs:
                 print(f"Trained {epoch}/{num_epochs} epochs for {self.model_name} on {self._input_name}")
+
+            # Use derivative checking to exit early if necessary
+            # If train error drops below test error too much we also start to worry that it will overfit
+            if should_exit_early(history['test_y_train_loss'][-USE_LAST_N:], history['test_y'][-USE_LAST_N:]):
+                break
+
+            # Exit if enough epochs
+            if epoch >= num_epochs:
+                break
 
         # Plot the training details
         fig, ax = plt.subplots()
@@ -426,7 +489,7 @@ class NeuralNetworkRegressor(Regressor):
         fig.savefig(f"{self.path}/{self._input_name} training details.png")
 
         # Skip saving the model for now
-        # self.save(net)
+        self.save(net, num_trains)
         self._model = net
 
         # Calculate error
@@ -441,9 +504,9 @@ class NeuralNetworkRegressor(Regressor):
     def init_net(self) -> nn.Module:
         raise NotImplementedError
 
-    def save(self, model: nn.Module):
+    def save(self, model: nn.Module, num_epochs: int):
         model_scripted = torch.jit.script(model) # Export to TorchScript
-        model_scripted.save(f'{self.path}/{self._input_name}.pt')
+        model_scripted.save(f'{self.path}/{self._input_name}_{num_epochs}epochs.pt')
 
     def load(self, path) -> nn.Module:
         model = torch.jit.load(path)
@@ -524,28 +587,25 @@ class Week2Net1(NeuralNetworkRegressor):
 # TO FUTURE ME: This does not generalize to other datas with different shapes, unlike week1net1 and week2net1
 class Week2Net2(NeuralNetworkRegressor):
     def init_net(self) -> nn.Module:
-        l, r = 38, 38
-        m = 129-l-r
-
         class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
                 self.left = nn.Sequential(
-                        nn.Linear(1, l*17),
+                        nn.Linear(1, 38*17),
                     )
                 self.middle = nn.Sequential(
                     nn.Linear(1, 10),
                     nn.Linear(10, 25),
-                    nn.Linear(25, m*17)
+                    nn.Linear(25, 53*17)
                 )
                 self.right = nn.Sequential(
-                        nn.Linear(1, r*17),
+                        nn.Linear(1, 38*17),
                     )
 
             def forward(self, x):
-                left = self.left(x).reshape((-1, l, 17))
-                mid = self.middle(x).reshape((-1, m, 17))
-                right = self.right(x).reshape((-1, r, 17))
+                left = self.left(x).reshape((-1, 38, 17))
+                mid = self.middle(x).reshape((-1, 53, 17))
+                right = self.right(x).reshape((-1, 38, 17))
                 res = torch.cat([left, mid, right], dim = 1).reshape((-1, 1, 2193))
                 return res
 
@@ -557,30 +617,27 @@ class Week2Net2(NeuralNetworkRegressor):
 
 class Week2Net3(NeuralNetworkRegressor):
     def init_net(self) -> nn.Module:
-        l, r = 38, 38
-        m = 129-l-r
-
         class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
                 self.left = nn.Sequential(
                         nn.Linear(1, 10),
-                        nn.Linear(10, l*17),
+                        nn.Linear(10, 38*17),
                     )
                 self.middle = nn.Sequential(
                     nn.Linear(1, 10),
                     nn.Linear(10, 25),
-                    nn.Linear(25, m*17)
+                    nn.Linear(25, 53*17)
                 )
                 self.right = nn.Sequential(
                         nn.Linear(1, 10),
-                        nn.Linear(10, r*17),
+                        nn.Linear(10, 38*17),
                     )
 
             def forward(self, x):
-                left = self.left(x).reshape((-1, l, 17))
-                mid = self.middle(x).reshape((-1, m, 17))
-                right = self.right(x).reshape((-1, r, 17))
+                left = self.left(x).reshape((-1, 38, 17))
+                mid = self.middle(x).reshape((-1, 53, 17))
+                right = self.right(x).reshape((-1, 38, 17))
                 res = torch.cat([left, mid, right], dim = 1).reshape((-1, 1, 2193))
                 return res
 
