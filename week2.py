@@ -155,12 +155,14 @@ def execute_test(model, num_to_test):
     model_test(model, num_to_test=num_to_test, verbose=True, use_progress_bar=False)
 
 # Sequentially/Parallelly(?) train all models and test the results
-def test_all_models(models, sequential, num_to_test=101):
+# calculates using the first num_to_test results
+# if sequential, show progress bar if pbar
+def test_all_models(models, sequential, num_to_test=101, pbar=False):
     t = time.time()
 
     if sequential:
         for model in models:
-            model_test(model, num_to_test=num_to_test, verbose=False, use_progress_bar=True)
+            model_test(model, num_to_test=num_to_test, verbose=False, use_progress_bar=pbar)
     else:
         processes: list[Process] = []
         for model in models:
@@ -207,5 +209,7 @@ def test_save_load():
 
 if __name__ == "__main__":
     test_all_models([
-        LinearRegression()
-    ], sequential=True, num_to_test=3)
+        Week1Net1(epochs=(600, 250), show_training_logs=True),
+        Week2Net1(epochs=(600, 250), show_training_logs=True),
+        Week2Net2(epochs=(600, 250), show_training_logs=True),
+    ], sequential=False, num_to_test=30, pbar=False)
