@@ -222,16 +222,29 @@ def batch_2():
         BayesianRidgeRegression(n_iter=3000, tol = 0.0001),
     ], sequential = False, to_test = range(1, 91))
 
-
 def batch_3():
-    tt = (1, 3, 5, 8, 10, 15, 20, 30, 40, 50, 60, 75, 90)
     test_all_models([
-        # Week1Net1(epochs = (600, 250), show_training_logs=True),
-        # Week2Net1(epochs = (600, 250), show_training_logs=True),
-        Week2Net2(epochs = (600, 10), show_training_logs=True),
-        # Week2Net3(epochs = (600, 250), show_training_logs=True),
-    ], sequential=False, to_test=(1, 3), pbar=False)
+        Week1Net1(epochs = (600, 250), show_training_logs=True),
+        Week2Net1(epochs = (600, 250), show_training_logs=True),
+        Week2Net2(epochs = (600, 250), show_training_logs=True),
+        Week2Net3(epochs = (600, 250), show_training_logs=True),
+    ], sequential=False, to_test=(1, 3, 5, 8, 10, 15, 20, 30, 40, 50, 60, 75, 90), pbar=False)
 
+# We trained batch 1 and 2 over all n ranging from 1 to 90, saving the results but only keeping the
+# (1, 3, 5, 8, 10, 15, 20, 30, 40, 50, 60, 75, 90)th animations
+# However, we only trained the neural nets on n = (1, 3, 5, 8, 10, 15, 20, 30, 40, 50, 60, 75, 90)
+# import os
+
+# for dir in os.listdir("./Datas/Week 2"):
+#     if dir.startswith("Week"):
+#         continue
+#     for file in os.listdir(f"./Datas/Week 2/{dir}"):
+#         if file.startswith("first") and file.endswith(".gif"):
+#             # It's one of those animations
+#             num_in_middle = int(file.split("_")[1].split(".")[0])
+#             if num_in_middle in (1, 3, 5, 8, 10, 15, 20, 30, 40, 50, 60, 75, 90):
+#                 continue
+#             os.remove(f"./Datas/Week 2/{dir}/{file}")
 if __name__ == "__main__":
     if sys.argv[1] == 'batch1':
         batch_1()

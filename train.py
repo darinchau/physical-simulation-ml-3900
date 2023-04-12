@@ -351,7 +351,7 @@ def should_exit_early(train_last_, test_last_):
     for tr, te in zip(train_last_, test_last_):
         if tr > te:
             return False
-        if abs(log(te) - log(tr)) < 0.5:
+        if abs(log(te) - log(tr)) < 0.75:
             return False
 
     return True
