@@ -4,7 +4,7 @@ import sys
 import os
 import shutil
 import time
-from load import load_data_week_1, make_anim_week_2, save_h5, peek_h5
+from load import *
 import numpy as np
 import matplotlib.pyplot as plt
 from train import *
@@ -12,6 +12,9 @@ from tqdm import tqdm
 import re
 from multiprocessing import Process
 from typing import Iterable
+from week2_nn import Week1Net1, Week2Net1, Week2Net2, Week2Net3
+from math import ceil
+from matplotlib import animation
 
 # Returns true if the pattern says the number of splits is ass
 def too_many_split(e: ValueError):
@@ -36,10 +39,100 @@ def create_folder_directory(folder_path):
 # Get the first n inputs as inputs, data and train index
 def get_first_n_inputs(n):
     inputs = np.arange(101)*0.75/100
-    data = load_data_week_1()
+    data = load_elec_potential()
     train_idx = list(range(n))
     return inputs, data, train_idx
 
+
+def make_anim_week_2(predicted_data, original_data, rmse, worse, path = None, prediction_name = None):
+    spacing_x = np.load("mesh_data_x.npy")
+    spacing_y = np.load("mesh_data_y.npy")
+
+    x, y = np.meshgrid(spacing_x, spacing_y)
+
+    # Set up figure and axis for animation
+    fig, axes = plt.subplots(5, 1, gridspec_kw={'height_ratios': [5, 5, 5, 1, 1]})
+
+    # Figure title
+    fig.suptitle(f"Results from {str(prediction_name)}")
+
+    # Use the same color bar for data for predicted results as well
+    vmin = np.min(original_data)
+    vmax = np.max(original_data)
+
+    # Ax 0 corresponds to the prediction and the data
+    axes[0].set_aspect("equal", adjustable="box")
+    axes[0].set_xlabel("X")
+    axes[0].set_ylabel("Y", va="bottom")
+    axes[0].set_title(f"Original data")
+    axes[0].set_yticks([])
+    data_heatmap = axes[0].pcolormesh(x, y, np.transpose(original_data[0]), cmap="hot", vmin=vmin, vmax=vmax)
+
+    # error colorbar
+    cbar0 = fig.colorbar(data_heatmap, ax=axes[0])
+    cbar0.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
+    tk0 = np.round(np.linspace(vmin, vmax, 4, endpoint=True), 2)
+    cbar0.set_ticks(tk0)
+
+    # Ax 1 for prediction
+    axes[1].set_aspect("equal", adjustable="box")
+    axes[1].set_xlabel("X")
+    axes[1].set_ylabel("Y", va="bottom")
+    axes[1].set_title(f"Predicted data")
+    axes[1].set_yticks([])
+    pred_heatmap = axes[1].pcolormesh(x, y, np.transpose(predicted_data[0]), cmap="hot", vmin=vmin, vmax=vmax)
+
+    # error colorbar
+    cbar1 = fig.colorbar(pred_heatmap, ax=axes[1])
+    cbar1.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
+    cbar1.set_ticks(tk0)
+
+    # Ax 2 corresponds to the errors
+    error = np.abs(predicted_data - original_data)
+    axes[2].set_aspect("equal", adjustable="box")
+    axes[2].set_xlabel("X")
+    axes[2].set_ylabel("Y", va="bottom")
+    axes[2].set_title(f"Error plot")
+    axes[2].set_yticks([])
+    err_heatmap = axes[2].pcolormesh(x, y, np.transpose(error[0]), cmap="hot", vmin=0, vmax=np.max(error))
+
+    # error colorbar. Set number of rounding decimals to one less than the order of magnitude
+    cbar2 = fig.colorbar(err_heatmap, ax=axes[2])
+    cbar2.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
+    num_decimals = -ceil(np.log10(np.max(error))) + 1
+    tk2 = np.round(np.linspace(0, np.max(error), 4, endpoint=True), num_decimals)
+    cbar2.set_ticks(tk2)
+
+    # Ax 3 is used purely to display error bounds information
+    axes[3].text(0, 0.5, f"RMSE Error = {rmse}, Worst error = {worse}", ha="left", va="center", fontsize=9)
+    axes[3].set_axis_off()
+
+    # Ax 4 is used to display the frame number
+    frame_nr = axes[4].text(0, 0.5, f"Frame 0 - 0V", ha="left", va="center", fontsize=9)
+    axes[4].set_axis_off()
+
+    # Define update function for animation
+    def update(frame):
+        data_heatmap.set_array(np.transpose(original_data[frame]))
+        pred_heatmap.set_array(np.transpose(predicted_data[frame]))
+        err_heatmap.set_array(np.transpose(error[frame]))
+        # The rounding is needed otherwise floating point antics makes everything look horrible
+        frame_nr.set_text(f"Frame {frame} - {round(frame*0.0075, 4)}V")
+        return data_heatmap, pred_heatmap, err_heatmap, frame_nr
+
+    # Create animation object and display it
+    anim = animation.FuncAnimation(fig, update, frames=predicted_data.shape[0], interval=50, blit=True)
+
+    plt.tight_layout()
+
+    if path is not None:
+        writergif = animation.PillowWriter(fps=20)
+        anim.save(path, writer=writergif)
+        # optimize_gif(path)
+    else:
+        plt.show()
+
+    plt.close("all")
 
 # Takes in a regressor and trains the regressor on 1 - 101 samples
 # to_test: An iterator of numbers for the "n" in first n data
@@ -69,7 +162,7 @@ def model_test(regressor: Regressor,
 
     # Save all the predictions to generate gif later
     predictions = {}
-    predictions["original"] = load_data_week_1()
+    predictions["original"] = load_elec_potential()
 
     # Make the iterator depending on whether we need tqdm (progress bar)
     if use_progress_bar:

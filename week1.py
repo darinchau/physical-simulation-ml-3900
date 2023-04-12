@@ -1,12 +1,12 @@
 ## This module is code from week one. We try to keep everything outside
 
 from train import train_mlp, train_gaussian_process
-from load import load_data_week_1, make_anim
 import numpy as np
 import torch
 from torch import nn
+from torch.utils.data import Dataset, DataLoader
 import numpy as np
-from load import load_data_week_1, wrap_data, make_anim, index_exclude, index_include
+from load import load_elec_potential, wrap_data, index_exclude, index_include
 import matplotlib.pyplot as plt
 import time
 import numpy as np
@@ -14,6 +14,60 @@ import torch.optim as optim
 from tqdm import trange
 from lazypredict.Supervised import LazyRegressor
 from train import GaussianRegression
+from matplotlib import animation
+
+def wrap_data(ins, data, train_idx: tuple[int, ...]):
+    num_data = len(data)
+    class WrappedData(Dataset):
+        def __init__(self, input, data, indices):
+            self.idxs = np.array(indices)
+            self.input = np.array(input)
+            self.data = np.array(data)
+
+        def __getitem__(self, index):
+            idx = self.idxs[index]
+            x = self.input[idx]
+            y = self.data[idx]
+            return x, y
+
+        def __len__(self):
+            return len(self.idxs)
+
+    # Train data from 1, 11, 21, ..., 101
+    train_data = WrappedData(ins, data, train_idx)
+
+    # Test data from the others
+    test_idx = tuple(set(range(num_data)) - set(train_idx))
+    test_data = WrappedData(ins, data, test_idx)
+
+    # Wrap in data loaders
+    train_dl = DataLoader(train_data, batch_size=1, shuffle=True)
+    test_dl = DataLoader(test_data, batch_size=1, shuffle=False)
+
+    return train_dl, test_dl
+
+def make_anim(data, path = None):
+    # Set up figure and axis for animation
+    fig, ax = plt.subplots()
+    heatmap = ax.imshow(data[0], cmap="hot")
+
+    # Add a colorbar to the heatmap
+    cbar = ax.figure.colorbar(heatmap, ax=ax)
+    cbar.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
+
+    # Define update function for animation
+    def update(frame):
+        heatmap.set_data(data[frame])
+        return heatmap,
+
+    # Create animation object and display it
+    anim = animation.FuncAnimation(fig, update, frames=data.shape[0], interval=50, blit=True)
+
+    if path is not None:
+        writergif = animation.PillowWriter(fps=30)
+        anim.save(path, writer=writergif)
+    else:
+        plt.show()
 
 # Raw training code
 def train_net(train_loader, test_loader, net, epochs = 5, verbose = False):
@@ -156,7 +210,7 @@ def predict_with_name(name):
 def train_week_1():
     net = Net()
     inputs = np.arange(101)*0.75/100
-    data = load_data_week_1()
+    data = load_elec_potential()
     train_idx = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
     train_mlp(inputs, data, train_idx, net)
 
@@ -173,7 +227,7 @@ def train_week_1():
 
 def dem2():
     inputs = np.arange(101)*0.75/100
-    data = load_data_week_1()
+    data = load_elec_potential()
     train_idx = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
     model, _ = train_gaussian_process(inputs, data, train_idx)

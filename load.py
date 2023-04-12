@@ -3,12 +3,14 @@ import matplotlib.pyplot as plt
 from matplotlib.colorbar import Colorbar
 from matplotlib.colors import Normalize
 from matplotlib import animation
-import torch
-from torch.utils.data import Dataset, DataLoader
 from math import ceil
 import subprocess
 from numpy.typing import NDArray
 import h5py
+
+SPACING_X = np.load("mesh_data_x.npy")
+SPACING_Y = np.load("mesh_data_y.npy")
+ELECTRIC_POTENTIAL = np.load("mesh_data_electrostatic_potential.npy")
 
 def optimize_gif(path):
     # Uses the gifsicle library
@@ -23,71 +25,20 @@ def index_exclude(data, exclude):
     return data[list(set(range(len(data))) - set(exclude))]
 
 # Load and return data. We expect data to be some 3 dimensional np array (N, rows, cols).
-def load_data_week_1():
-    data = np.load("mesh_data_electrostatic_potential.npy")
-    return data
+def load_elec_potential():
+    return ELECTRIC_POTENTIAL
 
 def split_data(ins, train_idx):
     return index_include(ins, train_idx), index_exclude(ins, train_idx)
 
-def wrap_data(ins, data, train_idx: tuple[int, ...]):
-    num_data = len(data)
-    class WrappedData(Dataset):
-        def __init__(self, input, data, indices):
-            self.idxs = np.array(indices)
-            self.input = np.array(input)
-            self.data = np.array(data)
+# Plots Predicted data, original data, error regions, errors and frame numbers
+def plot_data_with_spacing(predicted_data, path = None, prediction_name = None):
+    # Calculate error
+    rmse = np.sqrt(np.average((predicted_data - ELECTRIC_POTENTIAL) ** 2))
+    worst = np.max(np.abs(predicted_data - ELECTRIC_POTENTIAL))
 
-        def __getitem__(self, index):
-            idx = self.idxs[index]
-            x = self.input[idx]
-            y = self.data[idx]
-            return x, y
-
-        def __len__(self):
-            return len(self.idxs)
-
-    # Train data from 1, 11, 21, ..., 101
-    train_data = WrappedData(ins, data, train_idx)
-
-    # Test data from the others
-    test_idx = tuple(set(range(num_data)) - set(train_idx))
-    test_data = WrappedData(ins, data, test_idx)
-
-    # Wrap in data loaders
-    train_dl = DataLoader(train_data, batch_size=1, shuffle=True)
-    test_dl = DataLoader(test_data, batch_size=1, shuffle=False)
-
-    return train_dl, test_dl
-
-def make_anim(data, path = None):
-    # Set up figure and axis for animation
-    fig, ax = plt.subplots()
-    heatmap = ax.imshow(data[0], cmap="hot")
-
-    # Add a colorbar to the heatmap
-    cbar = ax.figure.colorbar(heatmap, ax=ax)
-    cbar.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
-
-    # Define update function for animation
-    def update(frame):
-        heatmap.set_data(data[frame])
-        return heatmap,
-
-    # Create animation object and display it
-    anim = animation.FuncAnimation(fig, update, frames=data.shape[0], interval=50, blit=True)
-
-    if path is not None:
-        writergif = animation.PillowWriter(fps=30)
-        anim.save(path, writer=writergif)
-    else:
-        plt.show()
-
-def make_anim_week_2(predicted_data, original_data, rmse, worse, path = None, prediction_name = None):
-    spacing_x = np.load("mesh_data_x.npy")
-    spacing_y = np.load("mesh_data_y.npy")
-
-    x, y = np.meshgrid(spacing_x, spacing_y)
+    # Load spacings into mesh grid
+    x, y = np.meshgrid(SPACING_X, SPACING_Y)
 
     # Set up figure and axis for animation
     fig, axes = plt.subplots(5, 1, gridspec_kw={'height_ratios': [5, 5, 5, 1, 1]})
@@ -96,8 +47,8 @@ def make_anim_week_2(predicted_data, original_data, rmse, worse, path = None, pr
     fig.suptitle(f"Results from {str(prediction_name)}")
 
     # Use the same color bar for data for predicted results as well
-    vmin = np.min(original_data)
-    vmax = np.max(original_data)
+    vmin = np.min(ELECTRIC_POTENTIAL)
+    vmax = np.max(ELECTRIC_POTENTIAL)
 
     # Ax 0 corresponds to the prediction and the data
     axes[0].set_aspect("equal", adjustable="box")
@@ -105,7 +56,7 @@ def make_anim_week_2(predicted_data, original_data, rmse, worse, path = None, pr
     axes[0].set_ylabel("Y", va="bottom")
     axes[0].set_title(f"Original data")
     axes[0].set_yticks([])
-    data_heatmap = axes[0].pcolormesh(x, y, np.transpose(original_data[0]), cmap="hot", vmin=vmin, vmax=vmax)
+    data_heatmap = axes[0].pcolormesh(x, y, np.transpose(ELECTRIC_POTENTIAL[0]), cmap="hot", vmin=vmin, vmax=vmax)
 
     # error colorbar
     cbar0 = fig.colorbar(data_heatmap, ax=axes[0])
@@ -127,7 +78,7 @@ def make_anim_week_2(predicted_data, original_data, rmse, worse, path = None, pr
     cbar1.set_ticks(tk0)
 
     # Ax 2 corresponds to the errors
-    error = np.abs(predicted_data - original_data)
+    error = np.abs(predicted_data - ELECTRIC_POTENTIAL)
     axes[2].set_aspect("equal", adjustable="box")
     axes[2].set_xlabel("X")
     axes[2].set_ylabel("Y", va="bottom")
@@ -143,7 +94,7 @@ def make_anim_week_2(predicted_data, original_data, rmse, worse, path = None, pr
     cbar2.set_ticks(tk2)
 
     # Ax 3 is used purely to display error bounds information
-    axes[3].text(0, 0.5, f"RMSE Error = {rmse}, Worst error = {worse}", ha="left", va="center", fontsize=9)
+    axes[3].text(0, 0.5, f"RMSE Error = {rmse}, Worst error = {worst}", ha="left", va="center", fontsize=9)
     axes[3].set_axis_off()
 
     # Ax 4 is used to display the frame number
@@ -152,7 +103,7 @@ def make_anim_week_2(predicted_data, original_data, rmse, worse, path = None, pr
 
     # Define update function for animation
     def update(frame):
-        data_heatmap.set_array(np.transpose(original_data[frame]))
+        data_heatmap.set_array(np.transpose(ELECTRIC_POTENTIAL[frame]))
         pred_heatmap.set_array(np.transpose(predicted_data[frame]))
         err_heatmap.set_array(np.transpose(error[frame]))
         # The rounding is needed otherwise floating point antics makes everything look horrible
@@ -173,8 +124,7 @@ def make_anim_week_2(predicted_data, original_data, rmse, worse, path = None, pr
 
     plt.close("all")
 
-
-### Save and load h5 files
+### Save h5 files
 def save_h5(d: dict[str, NDArray], path: str):
     # Open an HDF5 file in write mode
     with h5py.File(path, 'w') as f:
@@ -192,6 +142,7 @@ def save_h5(d: dict[str, NDArray], path: str):
             dataset.attrs.create('compression', 'gzip')
             dataset.attrs.create('compression_level', 6)
 
+# Helper function to load and print the structure of a h5
 def peek_h5(path: str):
     with h5py.File(path, 'r') as f:
         # Loop through keys of the file and print them
@@ -206,3 +157,15 @@ def peek_h5(path: str):
 
                 # Print the shape and first element of the dataset
                 print('\t\t', dataset.shape)
+
+# Import antics
+__all__ = [
+    "save_h5",
+    "peek_h5",
+    "plot_data_with_spacing",
+    "split_data",
+    "load_elec_potential",
+    "index_exclude",
+    "index_include",
+    "optimize_gif"
+]
