@@ -4,7 +4,7 @@ import sys
 import os
 import shutil
 import time
-from load import load_elec_potential, save_h5, peek_h5, plot_data_with_spacing
+from load import *
 import numpy as np
 import matplotlib.pyplot as plt
 from train import *
@@ -12,10 +12,7 @@ from tqdm import tqdm
 import re
 from multiprocessing import Process
 from typing import Iterable
-
-# Performs all the necessary plotting
-def make_anim():
-    pass
+import h5py
 
 # Returns true if the pattern says the number of splits is ass
 def too_many_split(e: ValueError):
@@ -44,6 +41,68 @@ def get_first_n_inputs(n):
     train_idx = list(range(n))
     return inputs, data, train_idx
 
+#Utility function for log to handle log 0
+def log_array(arr):
+    arr_log10 = np.log10(arr)
+    arr_log10[arr == 0] = np.min(arr_log10[arr != 0]) - 1
+    return arr_log10
+
+def make_anim(path, model_name):
+    with h5py.File(f"{path}/predictions.h5", 'r') as f:
+        # Keep note of the frame errors
+        frame_errors = {k: [] for k in f.keys()}
+
+        # Loop through keys of the file and print them
+        original_data = load_elec_potential()
+
+        for key in f.keys():
+            # Prediction, the index is to change it to numpy array
+            pred = f[key]['data'][:]
+
+            # First plot is the animation
+            # Animation :D
+            anim = AnimationMaker(101)
+            anim.add_plot(original_data, "original")
+            anim.add_plot(pred, "prediction", (np.min(original_data), np.max(original_data)))
+            anim.add_plot(np.abs(pred - original_data), "error", (0, None))
+            anim.add_plot(log_array(np.abs(pred - original_data)), "error (log10)")
+
+            # Total errors (RMSE, Worst errors, Worst error for the last 10 frames)
+            rmse = np.sqrt(np.mean((pred - original_data) ** 2))
+            worst = np.max(np.abs(pred - original_data))
+            rmse_last_10_frames = np.sqrt(np.mean((pred[-10:] - original_data[-10:]) ** 2))
+            worst_last_10_frames = np.max(np.abs(pred[-10:] - original_data[-10:]))
+
+            anim.add_text(f"RMSE: {round(rmse, 5)}, worst = {round(worst, 5)}")
+            anim.add_text(f"RMSE(last 10 frames): {round(rmse_last_10_frames, 5)}, worst(last 10 frames) = {round(worst_last_10_frames, 5)}")
+            anim.add_text([f"Frame {i}: {0.0075 * i} V" for i in range(101)])
+
+            anim.plot(f"Results from {model_name} with first {key[6:]} data", f"{path}/first {key[6:]}.gif")
+
+            # Second plot is error each frame for different ns
+            # Calculate RMSE for each frame
+            # Uses a for loop to save memory. I know einsum is a thing but I dont know how to use it
+            for i in range(101):
+                rmse = np.sqrt(np.mean((pred[i] - original_data[i]) ** 2))
+                frame_errors[key].append(rmse)
+
+        # Plot error each frame
+        fig, ax = plt.subplots()
+
+        for key, value in frame_errors.items():
+            # The indexing is on keys which is of the format "frame 123"
+            # So all it does is to crop away the prepedn
+            ax.plot(value, label=f"First {key[6:]}")
+
+        # add legend to the plot
+        ax.legend()
+
+        # Title
+        fig.suptitle("RMSE Error using the first n data across frames")
+
+        # Show the thing
+        fig.savefig(f"{path}/frame error.png")
+
 
 # Takes in a regressor and trains the regressor on 1 - 101 samples
 # to_test: An iterator of numbers for the "n" in first n data
@@ -51,14 +110,10 @@ def model_test(regressor: Regressor,
                to_test: Iterable[int],
                use_progress_bar = False,
                verbose = False):
-    # Define history array for plotting
-    hist = []
-    hist_idxs = []
-
     # Create the path to save the datas
     model_name = regressor.model_name
 
-    path = f"./Datas/Week 2/{model_name}"
+    path = f"./Datas/Week 3/{model_name}"
     path = create_folder_directory(path)
     logs_file = f"{path}/{model_name} logs.txt"
 
@@ -73,16 +128,12 @@ def model_test(regressor: Regressor,
 
     # Save all the predictions to generate gif later
     predictions = {}
-    predictions["original"] = load_elec_potential()
 
     # Make the iterator depending on whether we need tqdm (progress bar)
     if use_progress_bar:
         # Length of progress bar
         bar_length = 20
         to_test = tqdm(to_test, desc = desc, bar_format=f"{{l_bar}}{{bar:{bar_length}}}{{r_bar}}{{bar:-{bar_length}b}}")
-
-    # Branch off the save animation processes using multiprocessing because they take a long time
-    save_anim_processes = []
 
     for n in to_test:
         # Set metadata on regressor
@@ -102,21 +153,11 @@ def model_test(regressor: Regressor,
         # Calculate the model and compare with actual data
         pred = regressor.predict(inputs.reshape((-1, 1))).reshape((101, 129, 17))
 
-        # Calculate errors :) In order is: RMSE, worst over all data, RMSE for last 10
-        rmse = np.sqrt(np.mean((data - pred)**2))
-        worst = np.max(np.abs(data - pred))
-        rmse_last_10 = np.sqrt(np.mean((data[-10:] - pred[-10:])**2))
-
-        # Make and save the animation using multiprocessing
-        p = Process(target=make_anim, args=(pred, data, rmse, worst, f"{path}/first_{n}.gif", f"{model_name} with first {n} data"))
-        p.start()
-        save_anim_processes.append(p)
-
         # Save all the predictions
         predictions[f"frame {n}"] = pred
 
         # Create the logs
-        log = f"Done {model_name} using the first {n} data: RMSE = {rmse}, worst = {worst}"
+        log = f"Done {model_name} using the first {n} data"
         logs.append(log)
         print(log)
 
@@ -134,38 +175,8 @@ def model_test(regressor: Regressor,
             f.write(log)
             f.write("\n")
 
-    # Save the predictions
-    # THe predictions dict should be saved as this format:
-    # frame 1
-    #     data
-    #         (101, 129, 17)
-    # frame 2
-    #     data
-    #         (101, 129, 17)
-    # frame 3
-    #     data
-    #         (101, 129, 17)
-    # frame 4
-    #     data
-    #         (101, 129, 17)
-    # ... ...
-    # original
-    #     data
-    #         (101, 129, 17)
-    # Open an HDF5 file in write mode
-    save_h5(predictions, f"{path}/predictions.h5")
-
-    # Plot everything using matplotlib
-    plt.figure()
-    plt.plot(hist_idxs, hist)
-    plt.yscale("log")
-    plt.legend(["RMSE", "Worst error", "RMSE for last 10"])
-    plt.title(f"Result prediction using {model_name} from first n data")
-    plt.savefig(f"{path}/Predicted {model_name}.png")
-
-    # Join back the animation saving processes
-    for process in save_anim_processes:
-        process.join()
+    # Make some animations
+    make_anim(path, model_name)
 
 ############################################
 #### Helper Functions for model testing ####
@@ -195,5 +206,11 @@ def test_all_models(models, sequential, to_test, pbar=False):
 
     print(f"Total time taken: {round(time.time() - t, 3)}")
 
+GOAL_TEST = (1, 3, 5, 8, 10, 15, 20, 30, 40, 50, 60, 75, 90)
+
 if __name__ == "__main__":
-    pass
+    test_all_models([
+        GaussianLinearRegression(),
+    ], sequential=True, to_test=GOAL_TEST)
+
+    # make_anim("./Datas/Week 3/Gaussian Linear Hybrid 1", "GLH1")

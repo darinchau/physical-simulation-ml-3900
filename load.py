@@ -31,99 +31,6 @@ def load_elec_potential():
 def split_data(ins, train_idx):
     return index_include(ins, train_idx), index_exclude(ins, train_idx)
 
-# Plots Predicted data, original data, error regions, errors and frame numbers
-def plot_data_with_spacing(predicted_data, path = None, prediction_name = None):
-    # Calculate error
-    rmse = np.sqrt(np.average((predicted_data - ELECTRIC_POTENTIAL) ** 2))
-    worst = np.max(np.abs(predicted_data - ELECTRIC_POTENTIAL))
-
-    # Load spacings into mesh grid
-    x, y = np.meshgrid(SPACING_X, SPACING_Y)
-
-    # Set up figure and axis for animation
-    fig, axes = plt.subplots(5, 1, gridspec_kw={'height_ratios': [5, 5, 5, 1, 1]})
-
-    # Figure title
-    fig.suptitle(f"Results from {str(prediction_name)}")
-
-    # Use the same color bar for data for predicted results as well
-    vmin = np.min(ELECTRIC_POTENTIAL)
-    vmax = np.max(ELECTRIC_POTENTIAL)
-
-    # Ax 0 corresponds to the prediction and the data
-    axes[0].set_aspect("equal", adjustable="box")
-    axes[0].set_xlabel("X")
-    axes[0].set_ylabel("Y", va="bottom")
-    axes[0].set_title(f"Original data")
-    axes[0].set_yticks([])
-    data_heatmap = axes[0].pcolormesh(x, y, np.transpose(ELECTRIC_POTENTIAL[0]), cmap="hot", vmin=vmin, vmax=vmax)
-
-    # error colorbar
-    cbar0 = fig.colorbar(data_heatmap, ax=axes[0])
-    cbar0.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
-    tk0 = np.round(np.linspace(vmin, vmax, 4, endpoint=True), 2)
-    cbar0.set_ticks(tk0)
-
-    # Ax 1 for prediction
-    axes[1].set_aspect("equal", adjustable="box")
-    axes[1].set_xlabel("X")
-    axes[1].set_ylabel("Y", va="bottom")
-    axes[1].set_title(f"Predicted data")
-    axes[1].set_yticks([])
-    pred_heatmap = axes[1].pcolormesh(x, y, np.transpose(predicted_data[0]), cmap="hot", vmin=vmin, vmax=vmax)
-
-    # error colorbar
-    cbar1 = fig.colorbar(pred_heatmap, ax=axes[1])
-    cbar1.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
-    cbar1.set_ticks(tk0)
-
-    # Ax 2 corresponds to the errors
-    error = np.abs(predicted_data - ELECTRIC_POTENTIAL)
-    axes[2].set_aspect("equal", adjustable="box")
-    axes[2].set_xlabel("X")
-    axes[2].set_ylabel("Y", va="bottom")
-    axes[2].set_title(f"Error plot")
-    axes[2].set_yticks([])
-    err_heatmap = axes[2].pcolormesh(x, y, np.transpose(error[0]), cmap="hot", vmin=0, vmax=np.max(error))
-
-    # error colorbar. Set number of rounding decimals to one less than the order of magnitude
-    cbar2 = fig.colorbar(err_heatmap, ax=axes[2])
-    cbar2.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
-    num_decimals = -ceil(np.log10(np.max(error))) + 1
-    tk2 = np.round(np.linspace(0, np.max(error), 4, endpoint=True), num_decimals)
-    cbar2.set_ticks(tk2)
-
-    # Ax 3 is used purely to display error bounds information
-    axes[3].text(0, 0.5, f"RMSE Error = {rmse}, Worst error = {worst}", ha="left", va="center", fontsize=9)
-    axes[3].set_axis_off()
-
-    # Ax 4 is used to display the frame number
-    frame_nr = axes[4].text(0, 0.5, f"Frame 0 - 0V", ha="left", va="center", fontsize=9)
-    axes[4].set_axis_off()
-
-    # Define update function for animation
-    def update(frame):
-        data_heatmap.set_array(np.transpose(ELECTRIC_POTENTIAL[frame]))
-        pred_heatmap.set_array(np.transpose(predicted_data[frame]))
-        err_heatmap.set_array(np.transpose(error[frame]))
-        # The rounding is needed otherwise floating point antics makes everything look horrible
-        frame_nr.set_text(f"Frame {frame} - {round(frame*0.0075, 4)}V")
-        return data_heatmap, pred_heatmap, err_heatmap, frame_nr
-
-    # Create animation object and display it
-    anim = animation.FuncAnimation(fig, update, frames=predicted_data.shape[0], interval=50, blit=True)
-
-    plt.tight_layout()
-
-    if path is not None:
-        writergif = animation.PillowWriter(fps=20)
-        anim.save(path, writer=writergif)
-        optimize_gif(path)
-    else:
-        plt.show()
-
-    plt.close("all")
-
 ### Save h5 files
 def save_h5(d: dict[str, NDArray], path: str):
     # Open an HDF5 file in write mode
@@ -158,14 +65,125 @@ def peek_h5(path: str):
                 # Print the shape and first element of the dataset
                 print('\t\t', dataset.shape)
 
+# Wrapper class to help us plot data
+class AnimationMaker:
+    def __init__(self, animation_length: int):
+        self.maps = {}
+        self.text_frames = []
+        self.anim_len = animation_length
+
+    # scale is for the scale of the color bar we might want to generate. Default is the min and max of the frame
+    # name is the title of the plot
+    def add_plot(self, data, name, scale = None):
+        assert len(data) == self.anim_len
+        self.maps[name] = (data, scale)
+        return self
+
+    def add_text(self, texts: str | list[str]):
+        if isinstance(texts, str):
+            texts = [texts for _ in range(self.anim_len)]
+        assert len(texts) == self.anim_len
+        self.text_frames.append(texts)
+        return self
+
+    def plot(self, suptitle, path):
+        # Load the spacing using a mesh grid
+        x, y = np.meshgrid(SPACING_X, SPACING_Y)
+
+        # Number of axes to use
+        num_axes = len(self.maps) + len(self.text_frames)
+        height_ratios = [5] * len(self.maps) + [1] * len(self.text_frames)
+
+        # Set up figure and axis for animation
+        fig, axes = plt.subplots(num_axes, 1, gridspec_kw={'height_ratios': height_ratios})
+
+        # Figure title
+        fig.suptitle(suptitle)
+
+        # Store the data maps somewhere
+        heatmaps = {}
+
+        i = 0
+        for title, (data, scale) in self.maps.items():
+            # Plot the first frame of everything
+            axes[i].set_aspect("equal", adjustable="box")
+            axes[i].set_xlabel("X")
+            axes[i].set_ylabel("Y", va="bottom")
+            axes[i].set_title(title)
+            axes[i].set_yticks([])
+
+            # If the scale is none, then use the min and max of the function
+            # else if it is 'data', use the data's scale
+            # else use the custom scale in the form of a tuple. If one of the entries is None, use the min/max of the data
+            # We dont need custom scales now but we remain open here
+            # This is where rust enums would be soooooooo helpful
+            if scale is None:
+                vmin, vmax = np.min(data), np.max(data)
+            else:
+                vmin, vmax = scale[0], scale[1]
+                if vmin is None:
+                    vmin = np.min(data)
+                if vmax is None:
+                    vmax = np.max(data)
+
+            data_heatmap = axes[0].pcolormesh(x, y, np.transpose(data[0]), cmap = "hot", vmin = vmin, vmax = vmax)
+
+            # colorbar
+            cbar = fig.colorbar(data_heatmap, ax = axes[i])
+            cbar.ax.set_ylabel("Intensity", rotation = -90, va = "bottom")
+            tk0 = np.round(np.linspace(vmin, vmax, 4, endpoint=True), 2)
+            cbar.set_ticks(tk0)
+
+            # Increment the axis used
+            i += 1
+
+            # Store the heatmap for update later
+            heatmaps[title] = data_heatmap
+
+        # Now initialize the text
+        text_artists = []
+        for txt in self.text_frames:
+            text_artist = axes[i].text(0, 0.5, txt[0], ha="left", va="center", fontsize=9)
+            axes[i].set_axis_off()
+            text_artists.append(text_artist)
+            i += 1
+
+        # Define update function for animation
+        def update(frame):
+            artists = []
+            for k, heatmap in heatmaps.items():
+                data, _ = self.maps[k]
+                heatmap.set_array(np.transpose(data[frame]))
+                artists.append(heatmap)
+
+            for text, artist in zip(self.text_frames, text_artists):
+                artist.set_text(text[frame])
+                artists.append(artist)
+
+            return artists
+
+        # Create animation object and display it
+        anim = animation.FuncAnimation(fig, update, frames = self.anim_len, interval=50, blit=True)
+
+        plt.tight_layout()
+
+        if path is not None:
+            writergif = animation.PillowWriter(fps=20)
+            anim.save(path, writer=writergif)
+            optimize_gif(path)
+        else:
+            plt.show()
+
+        plt.close("all")
+
 # Import antics
 __all__ = [
     "save_h5",
     "peek_h5",
-    "plot_data_with_spacing",
     "split_data",
     "load_elec_potential",
     "index_exclude",
     "index_include",
-    "optimize_gif"
+    "optimize_gif",
+    "AnimationMaker"
 ]
