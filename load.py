@@ -66,7 +66,7 @@ def peek_h5(path: str):
                 print('\t\t', dataset.shape)
 
 # Wrapper class to help us plot data
-def make_anim_week_3(predicted_data, original_data, path = None, prediction_name = None):
+def make_anim(predicted_data, original_data, path = None, prediction_name = None):
     spacing_x = np.load("mesh_data_x.npy")
     spacing_y = np.load("mesh_data_y.npy")
 
@@ -194,3 +194,82 @@ def make_anim_week_3(predicted_data, original_data, path = None, prediction_name
         plt.show()
 
     plt.close("all")
+
+# Helper function to extract the middle region and outer region
+def split_mid_outer(data):
+    middle = data[:, 40:-40, :]
+    outer = np.concatenate([data[:, :40, :], data[:, -40:, :]], axis=1)
+    return middle, outer
+
+# Helper function that creates the line graphs across frames for different n
+def make_static_plot(frame_errors, val_f, plot_name, path):
+        # Plot error each frame
+        fig, ax = plt.subplots()
+
+        for key, list_values in frame_errors.items():
+            # The indexing is on keys which is of the format "frame 123"
+            # So all it does is to crop away the prepend
+            if int(key[6:]) in (1, 5, 10, 20, 40, 60, 90):
+                # plot solid line for even indices
+                ax.plot([val_f(entry) for entry in list_values], label=f"First {key[6:]}")
+            else:
+                # plot dotted line for odd indices
+                continue
+
+        # add legend to the plot
+        ax.legend()
+
+        # Title
+        fig.suptitle(f"{plot_name} using the first n data across frames")
+
+        # Show the thing
+        fig.savefig(f"{path}/{plot_name} across frame.png")
+
+        # Set y-axis to log scale
+        ax.set_yscale('log')
+
+        # Save the figure again in log scale
+        fig.savefig(f"{path}/{plot_name} across frame log.png")
+
+# Takes a path, reads the predictions inside and generate all sorts of animations/plots
+# If you want to add extra plots, this is the function you have to worry about
+def make_plots(path):
+    # Retreive the model name from the path
+    model_name = path.split("/")[-1]
+
+    with h5py.File(f"{path}/predictions.h5", 'r') as f:
+        # Keep note of the frame errors
+        frame_errors = {k: [] for k in f.keys()}
+
+        # Loop through keys of the file and print them
+        original_data = load_elec_potential()
+        data_mid, data_outer = split_mid_outer(original_data)
+
+        for key in f.keys():
+            # Prediction, the index is to change it to numpy array
+            pred = f[key]['data'][:]
+
+            # First plot is the animation
+            # Animation :D
+            make_anim(pred, original_data, f"{path}/first {key[6:]}.gif", f"Results from {model_name} first {key[6:]}")
+
+            pred_mid, pred_outer = split_mid_outer(pred)
+
+            # Second plot is error each frame for different ns
+            # Uses a for loop to save memory. I know einsum is a thing but I dont know how to use it
+            for i in range(101):
+                # General RMSE
+                rmse = np.sqrt(np.mean((pred[i] - original_data[i]) ** 2))
+                worst = np.max(np.abs(pred[i] - original_data[i]))
+
+                # Region-specific RMSE
+                middle_rmse = np.sqrt(np.mean((pred_mid[i] - data_mid[i]) ** 2))
+                outer_rmse = np.sqrt(np.mean((pred_outer[i] - data_outer[i]) ** 2))
+
+                # Append all errors
+                frame_errors[key].append((rmse, worst, middle_rmse, outer_rmse))
+
+            make_static_plot(frame_errors, lambda x: x[0], "RMSE Error", path)
+            make_static_plot(frame_errors, lambda x: x[1], "Worst Error", path)
+            make_static_plot(frame_errors, lambda x: x[2], "Middle RMSE", path)
+            make_static_plot(frame_errors, lambda x: x[3], "Outer RMSE", path)

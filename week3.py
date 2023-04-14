@@ -14,6 +14,9 @@ from multiprocessing import Process
 from typing import Iterable
 import h5py
 
+# The place to store all your datas
+PATH_PREPEND = "./Datas/Week 3"
+
 # Returns true if the pattern says the number of splits is ass
 def too_many_split(e: ValueError):
     st = e.args[0]
@@ -41,47 +44,6 @@ def get_first_n_inputs(n):
     train_idx = list(range(n))
     return inputs, data, train_idx
 
-def make_plots(path, model_name):
-    with h5py.File(f"{path}/predictions.h5", 'r') as f:
-        # Keep note of the frame errors
-        frame_errors = {k: [] for k in f.keys()}
-
-        # Loop through keys of the file and print them
-        original_data = load_elec_potential()
-
-        for key in f.keys():
-            # Prediction, the index is to change it to numpy array
-            pred = f[key]['data'][:]
-
-            # First plot is the animation
-            # Animation :D
-            make_anim_week_3(pred, original_data, f"{path}/first {key[6:]}.gif", f"Results from {model_name} first {key[6:]}")
-
-            # Second plot is error each frame for different ns
-            # Calculate RMSE for each frame
-            # Uses a for loop to save memory. I know einsum is a thing but I dont know how to use it
-            for i in range(101):
-                rmse = np.sqrt(np.mean((pred[i] - original_data[i]) ** 2))
-                frame_errors[key].append(rmse)
-
-        # Plot error each frame
-        fig, ax = plt.subplots()
-
-        for key, value in frame_errors.items():
-            # The indexing is on keys which is of the format "frame 123"
-            # So all it does is to crop away the prepedn
-            ax.plot(value, label=f"First {key[6:]}")
-
-        # add legend to the plot
-        ax.legend()
-
-        # Title
-        fig.suptitle("RMSE Error using the first n data across frames")
-
-        # Show the thing
-        fig.savefig(f"{path}/frame error.png")
-
-
 # Takes in a regressor and trains the regressor on 1 - 101 samples
 # to_test: An iterator of numbers for the "n" in first n data
 def model_test(regressor: Regressor,
@@ -91,7 +53,7 @@ def model_test(regressor: Regressor,
     # Create the path to save the datas
     model_name = regressor.model_name
 
-    path = f"./Datas/Week 3/{model_name}"
+    path = f"{PATH_PREPEND}/{model_name}"
     path = create_folder_directory(path)
     logs_file = f"{path}/{model_name} logs.txt"
 
@@ -174,14 +136,27 @@ def test_all_models(models, sequential, to_test, pbar=False):
 
     print(f"Total time taken: {round(time.time() - t, 3)}")
 
+# The values of n to test
 GOAL_TEST = (1, 3, 5, 8, 10, 15, 20, 30, 40, 50, 60, 75, 90)
 
 if __name__ == "__main__":
     test_all_models([
-        DecisionTreeRegression(),
         RidgeCVRegression(),
         GaussianRegression(),
         LinearRegression(),
-    ], sequential=False, to_test=GOAL_TEST)
 
-    # make_anim("./Datas/Week 3/Gaussian Linear Hybrid 1", "GLH1")
+        GLH1Regression((30, 69, 30)),
+        GLH1Regression((35, 59, 35)),
+        GLH1Regression((40, 49, 40)),
+        GLH1Regression((45, 39, 45)),
+
+        GLH2Regression((30, 69, 30)),
+        GLH2Regression((35, 59, 35)),
+        GLH2Regression((40, 49, 40)),
+        GLH2Regression((45, 39, 45)),
+
+        GLH3Regression((30, 69, 30)),
+        GLH3Regression((35, 59, 35)),
+        GLH3Regression((40, 49, 40)),
+        GLH3Regression((45, 39, 45)),
+    ], sequential=False, to_test=GOAL_TEST)

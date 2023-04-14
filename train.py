@@ -23,14 +23,19 @@ class Regressor:
     def model_name(self):
         raise NotImplementedError
 
+    @virtual
+    # Takes in xtrain and ytrain and outputs the model. The outputted model will be saved to a self.model attribute
+    def fit_model(self, xtrain, ytrain, xtest, ytest):
+        raise NotImplementedError
+
     @property
     def model(self):
         if not hasattr(self, "_model"):
             raise AttributeError("Regression model has not been trained yet")
         return self._model
 
+    # Sets the path to save whatever produced inside the model
     def set_path(self, path):
-        # Sets the path to save whatever produced inside the model
         self._path = path
 
     # Sets the name of the input so that stuff is saved with names nicely
@@ -58,10 +63,6 @@ class Regressor:
                 continue
             st += f"\n{k} = {str(v)}"
         return st
-
-    @virtual
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
-        raise NotImplementedError
 
     def preprocess(self, inputs, raw_data, training_idx):
         # Reshape data because gaussian process expects one dimensional output only
@@ -384,7 +385,8 @@ class NeuralNetModel(nn.Module):
             input_name = "",
             path = "./",
             save_model = True,
-            show_logs = True):
+            show_logs = True,
+            exit_early = True):
 
         # Wrap everything in dataloaders to prepare for training
         # Convert numpy arrays to PyTorch tensors and move to device
@@ -486,7 +488,7 @@ class NeuralNetModel(nn.Module):
 
             # Use derivative checking to exit early if necessary
             # If train error drops below test error too much we also start to worry that it will overfit
-            if should_exit_early(history['test_y_train_loss'][-USE_LAST_N:], history['test_y'][-USE_LAST_N:]):
+            if exit_early and should_exit_early(history['test_y_train_loss'][-USE_LAST_N:], history['test_y'][-USE_LAST_N:]):
                 break
 
             # Exit if enough epochs
@@ -532,30 +534,49 @@ class SimpleNNRegressor(Regressor):
     def model_name(self):
         return "Week 3 Neural net 1"
 
+#############################################################################################
+#### A hybrid regressor indicates that we train different regions using different models ####
+#############################################################################################
+
+# Its main use is to do indicate a hybrid regressor
+# We might add some specific functions here in the future :)
+class HybridRegressor(Regressor):
+    def __init__(self, region_size = (40, 49, 40)):
+        self.region_size = region_size
+
 # Now with this abstraction in mind we can build much more convoluted stuff
 # Idea 1: Use Gaussian and Linear mix because linear performs quite well on the sides
 # but Gaussian performs quite well in the middle
-class GaussianLinearRegression(Regressor):
+class GLH1Regression(HybridRegressor):
     def fit_model(self, xtrain, ytrain, xtest, ytest):
-        ytrain = ytrain.reshape((-1, 129, 17))
-        yleft = ytrain[:, :40, :].reshape((-1, 40*17))
-        ymiddle = ytrain[:, 40:89, :].reshape((-1, 49*17))
-        yright = ytrain[:, 89:, :].reshape((-1, 40*17))
+        # Outer region size
+        outer_size = self.region_size[0]
+        inner_size = self.region_size[1]
+
+        yt = ytrain.reshape((-1, 129, 17))
+        yleft = yt[:, :outer_size, :].reshape((-1, outer_size * 17))
+        ymiddle = yt[:, outer_size:-outer_size, :].reshape((-1, inner_size * 17))
+        yright = yt[:, -outer_size:, :].reshape((-1, outer_size * 17))
 
         left_model = Linear().fit(xtrain, yleft)
         right_model = Linear().fit(xtrain, yright)
 
-        # Define the kernel function
-        kernel = RBF(length_scale=1.0)
         # Define the Gaussian Process Regression model
-        model = GaussianProcessRegressor(kernel=kernel, alpha=1e-5, n_restarts_optimizer=10).fit(xtrain, ymiddle)
+        model = GaussianProcessRegressor(
+            kernel = RBF(length_scale=1.0),
+            alpha = 1e-5,
+            n_restarts_optimizer = 10
+            ).fit(xtrain, ymiddle)
 
         return (left_model, model, right_model)
 
     def predict(self, xtest):
-        l = self._model[0].predict(xtest).reshape((-1, 40, 17))
-        m = self._model[1].predict(xtest).reshape((-1, 49, 17))
-        r = self._model[2].predict(xtest).reshape((-1, 40, 17))
+        outer_size = self.region_size[0]
+        inner_size = self.region_size[1]
+
+        l = self.model[0].predict(xtest).reshape((-1, outer_size, 17))
+        m = self.model[1].predict(xtest).reshape((-1, inner_size, 17))
+        r = self.model[2].predict(xtest).reshape((-1, outer_size, 17))
 
         y = np.concatenate([l, m, r], axis = 1)
 
@@ -566,6 +587,95 @@ class GaussianLinearRegression(Regressor):
     @property
     def model_name(self):
         return "Gaussian Linear Hybrid 1"
+
+# Idea 1.1: Use the same linear model to predict the sides, and then also feed that data into the gaussian model
+class GLH2Regression(HybridRegressor):
+    def fit_model(self, xtrain, ytrain, xtest, ytest):
+        outer_size = self.region_size[0]
+        inner_size = self.region_size[1]
+
+        # Fit the outer model
+        outer_model = Linear().fit(xtrain, ytrain)
+
+        # Take the outer part of the result and put it into x
+        y_pred = outer_model.predict(xtrain).reshape((-1, 129, 17))
+        # Trim it to get the outer part
+        y_pred_left = y_pred[:, :outer_size, :].reshape((-1, outer_size*17))
+        y_pred_right = y_pred[:, -outer_size:, :].reshape((-1, outer_size*17))
+        # Merge the arrays
+        x_merge = np.concatenate([xtrain, y_pred_left, y_pred_right], axis = 1)
+
+        # Train the middle part
+        yt = ytrain.reshape((-1, 129, 17))
+        ymiddle = yt[:, outer_size:-outer_size, :].reshape((-1, inner_size * 17))
+
+        # Gaussian process to train the middle
+        inner_model = GaussianProcessRegressor(kernel=RBF(length_scale=1.0), alpha=1e-5, n_restarts_optimizer=10).fit(x_merge, ymiddle)
+
+        return (outer_model, inner_model)
+
+    def predict(self, xtest):
+        outer_size = self.region_size[0]
+        inner_size = self.region_size[1]
+
+        # Predict outer model
+        y_pred = self.model[0].predict(xtest).reshape((-1, 129, 17))
+
+        y_pred_left = y_pred[:, :outer_size, :].reshape((-1, outer_size*17))
+        y_pred_right = y_pred[:, -outer_size:, :].reshape((-1, outer_size*17))
+        x_merge = np.concatenate([xtest, y_pred_left, y_pred_right], axis = 1)
+
+        # Predict inner model
+        inner = self.model[1].predict(x_merge).reshape((-1, inner_size, 17))
+
+        y_pred[:, outer_size:-outer_size, :] = inner
+        y_pred = y_pred.reshape((-1, 129*17))
+
+        return y_pred
+
+    @property
+    def model_name(self):
+        return "Gaussian Linear Hybrid 2"
+
+# Idea 1.2: what if we feed the entire linear model into the Gaussian model and see what happens?
+class GLH3Regression(HybridRegressor):
+    def fit_model(self, xtrain, ytrain, xtest, ytest):
+        outer_size = self.region_size[0]
+        inner_size = self.region_size[1]
+
+        # Fit the outer model
+        outer_model = Linear().fit(xtrain, ytrain)
+
+        # Train the middle part
+        y_pred = outer_model.predict(xtrain)
+        x_merge = np.concatenate([xtrain, y_pred], axis = 1)
+
+        ymiddle = ytrain.reshape((-1, 129, 17))[:, outer_size:-outer_size, :].reshape((-1, inner_size * 17))
+
+        # Gaussian process to train the middle
+        inner_model = GaussianProcessRegressor(kernel=RBF(length_scale=1.0), alpha=1e-5, n_restarts_optimizer=10).fit(x_merge, ymiddle)
+
+        return (outer_model, inner_model)
+
+    def predict(self, xtest):
+        outer_size = self.region_size[0]
+        inner_size = self.region_size[1]
+
+        y_pred = self.model[0].predict(xtest)
+        x_merge = np.concatenate([xtest, y_pred], axis = 1)
+
+        inner = self.model[1].predict(x_merge).reshape((-1, inner_size, 17))
+
+        y_pred = y_pred.reshape((-1, 129, 17))
+        y_pred[:, outer_size:-outer_size, :] = inner
+        y_pred = y_pred.reshape((-1, 129*17))
+
+        return y_pred
+
+    @property
+    def model_name(self):
+        return "Gaussian Linear Hybrid 3"
+
 
 # Import antics
 __all__ = [
@@ -580,5 +690,7 @@ __all__ = [
     "MultiTaskElasticNetCVRegression",
     "BayesianRidgeRegression",
     "SimpleNNRegressor",
-    "GaussianLinearRegression"
+    "GLH1Regression",
+    "GLH2Regression",
+    "GLH3Regression",
 ]
