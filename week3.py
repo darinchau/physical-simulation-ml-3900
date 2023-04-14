@@ -41,13 +41,7 @@ def get_first_n_inputs(n):
     train_idx = list(range(n))
     return inputs, data, train_idx
 
-#Utility function for log to handle log 0
-def log_array(arr):
-    arr_log10 = np.log10(arr)
-    arr_log10[arr == 0] = np.min(arr_log10[arr != 0]) - 1
-    return arr_log10
-
-def make_anim(path, model_name):
+def make_plots(path, model_name):
     with h5py.File(f"{path}/predictions.h5", 'r') as f:
         # Keep note of the frame errors
         frame_errors = {k: [] for k in f.keys()}
@@ -61,23 +55,7 @@ def make_anim(path, model_name):
 
             # First plot is the animation
             # Animation :D
-            anim = AnimationMaker(101)
-            anim.add_plot(original_data, "original")
-            anim.add_plot(pred, "prediction", (np.min(original_data), np.max(original_data)))
-            anim.add_plot(np.abs(pred - original_data), "error", (0, None))
-            anim.add_plot(log_array(np.abs(pred - original_data)), "error (log10)")
-
-            # Total errors (RMSE, Worst errors, Worst error for the last 10 frames)
-            rmse = np.sqrt(np.mean((pred - original_data) ** 2))
-            worst = np.max(np.abs(pred - original_data))
-            rmse_last_10_frames = np.sqrt(np.mean((pred[-10:] - original_data[-10:]) ** 2))
-            worst_last_10_frames = np.max(np.abs(pred[-10:] - original_data[-10:]))
-
-            anim.add_text(f"RMSE: {round(rmse, 5)}, worst = {round(worst, 5)}")
-            anim.add_text(f"RMSE(last 10 frames): {round(rmse_last_10_frames, 5)}, worst(last 10 frames) = {round(worst_last_10_frames, 5)}")
-            anim.add_text([f"Frame {i}: {0.0075 * i} V" for i in range(101)])
-
-            anim.plot(f"Results from {model_name} with first {key[6:]} data", f"{path}/first {key[6:]}.gif")
+            make_anim_week_3(pred, original_data, f"{path}/first {key[6:]}.gif", f"Results from {model_name} first {key[6:]}")
 
             # Second plot is error each frame for different ns
             # Calculate RMSE for each frame
@@ -120,9 +98,6 @@ def model_test(regressor: Regressor,
     # Set some information on the regressor
     regressor.set_path(path)
 
-    # Create the logs and description
-    logs = []
-
     desc = f"Training {model_name}"
     desc += " " * (45 - len(desc))
 
@@ -156,27 +131,20 @@ def model_test(regressor: Regressor,
         # Save all the predictions
         predictions[f"frame {n}"] = pred
 
-        # Create the logs
+        # Print some indication on finishing first n
         log = f"Done {model_name} using the first {n} data"
-        logs.append(log)
         print(log)
 
         # Save the history at each step
         save_h5(predictions, f"{path}/predictions.h5")
 
     # Create the file and overwrite as blank if necessary
+    # Write the training info of the regressor (mostly hyperparameters)
     with open(logs_file, "w", encoding="utf-8") as f:
         f.write(regressor.train_info)
-        f.write("\n\n\n")
-
-    # Append all the logs
-    with open(logs_file, "a") as f:
-        for log in logs:
-            f.write(log)
-            f.write("\n")
 
     # Make some animations
-    make_anim(path, model_name)
+    make_plots(path, model_name)
 
 ############################################
 #### Helper Functions for model testing ####
@@ -210,7 +178,10 @@ GOAL_TEST = (1, 3, 5, 8, 10, 15, 20, 30, 40, 50, 60, 75, 90)
 
 if __name__ == "__main__":
     test_all_models([
-        GaussianLinearRegression(),
-    ], sequential=True, to_test=GOAL_TEST)
+        DecisionTreeRegression(),
+        RidgeCVRegression(),
+        GaussianRegression(),
+        LinearRegression(),
+    ], sequential=False, to_test=GOAL_TEST)
 
     # make_anim("./Datas/Week 3/Gaussian Linear Hybrid 1", "GLH1")
