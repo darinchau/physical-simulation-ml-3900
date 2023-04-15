@@ -25,7 +25,7 @@ class Regressor:
 
     @virtual
     # Takes in xtrain and ytrain and outputs the model. The outputted model will be saved to a self.model attribute
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
+    def fit_model(self, xtrain, ytrain):
         raise NotImplementedError
 
     @property
@@ -111,7 +111,7 @@ class Regressor:
 
         # Train the model
         np.random.seed(12345)
-        model = self.fit_model(xtrain, ytrain, xtest, ytest)
+        model = self.fit_model(xtrain, ytrain)
 
         self._model = model
 
@@ -121,7 +121,7 @@ class Regressor:
         return err
 
 class GaussianRegression(Regressor):
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
+    def fit_model(self, xtrain, ytrain):
         # Define the kernel function
         kernel = RBF(length_scale=1.0)
 
@@ -138,7 +138,7 @@ class GaussianRegression(Regressor):
         return "Gaussian process"
 
 class LinearRegression(Regressor):
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
+    def fit_model(self, xtrain, ytrain):
         model =  Linear().fit(xtrain, ytrain)
         return model
 
@@ -150,7 +150,7 @@ class RidgeCVRegression(Regressor):
     def __init__(self, cv=5):
         self.cv = cv
 
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
+    def fit_model(self, xtrain, ytrain):
         # Fit the RidgeCV regression model on the training data
         model = RidgeCV(cv=self.cv).fit(xtrain, ytrain)
 
@@ -166,7 +166,7 @@ class MultiTaskElasticNetCVRegression(Regressor):
         self.l1_ratio = l1_ratio
         self.cv = cv
 
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
+    def fit_model(self, xtrain, ytrain):
         # Fit the MultiTaskElasticNetCV regression model on the training data
         model = MultiTaskElasticNetCV(l1_ratio=self.l1_ratio, cv=self.cv).fit(xtrain, ytrain)
 
@@ -182,7 +182,7 @@ class MultiTaskLassoCVRegression(Regressor):
     def __init__(self, cv=5):
         self.cv = cv
 
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
+    def fit_model(self, xtrain, ytrain):
         # Fit the MultiTaskLassoCV regression model on the training data
         model = MultiTaskLassoCV(cv=self.cv).fit(xtrain, ytrain)
 
@@ -208,7 +208,7 @@ class DecisionTreeRegression(Regressor):
         self.max_leaf_nodes = max_leaf_nodes
         self.min_impurity_decrease = min_impurity_decrease
 
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
+    def fit_model(self, xtrain, ytrain):
         return DecisionTree(criterion=self.criterion, splitter=self.splitter, max_depth=self.max_depth,
                                       min_samples_split=self.min_samples_split, min_samples_leaf=self.min_samples_leaf,
                                       min_weight_fraction_leaf=self.min_weight_fraction_leaf, max_features=self.max_features,
@@ -267,7 +267,7 @@ class BayesianRidgeRegression(MultipleRegressor):
         self.lambda_1 = lambda_1
         self.lambda_2 = lambda_2
 
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
+    def fit_model(self, xtrain, ytrain):
         return BayesianRidge(n_iter=self.n_iter, tol=self.tol, alpha_1=self.alpha_1, alpha_2=self.alpha_2,
                              lambda_1=self.lambda_1, lambda_2=self.lambda_2).fit(xtrain, ytrain)
 
@@ -284,7 +284,7 @@ class SGDRegression(MultipleRegressor):
         self.max_iter = max_iter
         self.tol = tol
 
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
+    def fit_model(self, xtrain, ytrain):
         return SGD(loss=self.loss, penalty=self.penalty, alpha=self.alpha, l1_ratio=self.l1_ratio,
                              max_iter=self.max_iter, tol=self.tol).fit(xtrain, ytrain)
 
@@ -299,7 +299,7 @@ class PassiveAggressiveRegression(MultipleRegressor):
         self.max_iter = max_iter
         self.tol = tol
 
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
+    def fit_model(self, xtrain, ytrain):
         return PassiveAggressive(C=self.C, fit_intercept=self.fit_intercept,
                                           max_iter=self.max_iter, tol=self.tol).fit(xtrain, ytrain)
 
@@ -355,7 +355,7 @@ def should_exit_early(train_last_, test_last_):
 class NeuralNetModel(nn.Module):
     @virtual
     # This will be called exactly once before training
-    def init_net(self, input_size, output_size):
+    def init_net(self):
         raise NotImplementedError
 
     @virtual
@@ -401,9 +401,7 @@ class NeuralNetModel(nn.Module):
         test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         # Initialize the net (the layers)
-        input_size = xtrain.shape[1]
-        output_size = ytrain.shape[1]
-        self.init_net(input_size, output_size)
+        self.init_net()
 
         # Start training
         net = self.to(self._device)
@@ -514,16 +512,38 @@ class NeuralNetModel(nn.Module):
 
         return self
 
+# Any regressor that contains a neural net should inherit from this class
+# This gives us access to xtest and ytest during the fitting process
+class NeuralNetRegressor(Regressor):
+    @virtual
+    def fit_model(self, xtrain, ytrain, xtest, ytest):
+        raise NotImplementedError
+
+    def fit(self, inputs, raw_data, training_idx, verbose=False, skip_error=False):
+        # Split data
+        xtrain, xtest, ytrain, ytest = self.preprocess(inputs, raw_data, training_idx)
+
+        # Train the model
+        np.random.seed(12345)
+        model = self.fit_model(xtrain, ytrain, xtest, ytest)
+
+        self._model = model
+
+        # Calculate and return error
+        err = self.calculate_error(xtest, ytest, skip_error, verbose)
+
+        return err
+
 # We can define custom models and regressors for said models minimally
 class Week3Net1(NeuralNetModel):
-    def init_net(self, input_size, output_size):
-        self.fc = nn.Linear(input_size, output_size)
+    def init_net(self):
+        self.fc = nn.Linear(1, 2193)
 
     def predict_(self, xtest):
         return self.fc(xtest)
 
 # A wrapper class for Week 3 net 1
-class SimpleNNRegressor(Regressor):
+class SimpleNNRegressor(NeuralNetRegressor):
     def fit_model(self, xtrain, ytrain, xtest, ytest):
         return Week3Net1().fit(xtrain, ytrain, xtest, ytest,
                                model_name = self.model_name,
@@ -548,7 +568,7 @@ class HybridRegressor(Regressor):
 # Idea 1: Use Gaussian and Linear mix because linear performs quite well on the sides
 # but Gaussian performs quite well in the middle
 class GLH1Regression(HybridRegressor):
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
+    def fit_model(self, xtrain, ytrain):
         # Outer region size
         outer_size = self.region_size[0]
         inner_size = self.region_size[1]
@@ -590,7 +610,7 @@ class GLH1Regression(HybridRegressor):
 
 # Idea 1.1: Use the same linear model to predict the sides, and then also feed that data into the gaussian model
 class GLH2Regression(HybridRegressor):
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
+    def fit_model(self, xtrain, ytrain):
         outer_size = self.region_size[0]
         inner_size = self.region_size[1]
 
@@ -639,7 +659,7 @@ class GLH2Regression(HybridRegressor):
 
 # Idea 1.2: what if we feed the entire linear model into the Gaussian model and see what happens?
 class GLH3Regression(HybridRegressor):
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
+    def fit_model(self, xtrain, ytrain):
         outer_size = self.region_size[0]
         inner_size = self.region_size[1]
 
@@ -676,6 +696,24 @@ class GLH3Regression(HybridRegressor):
     def model_name(self):
         return "Gaussian Linear Hybrid 3"
 
+# Idea 2. The linear model seems to predict the datas really well.
+# Could we try to predict the potential increase part and the depletion part separately?
+# In reality, the physical behavior of the material should change gradually
+# A piecewise function doesnt exist per se
+# So I am guessing its kinda like a relu except smoothed out a teeny tiny little bit
+# and we try to use that little bit of smoothness to guess where the change might occur
+# So we first look at the results really hard, and try to guess at what voltage the depletion might start to occur
+# And then use said depletion voltage to guess rest of the term
+class DepletionVoltageGuesser(NeuralNetModel):
+    def init_net(self):
+        raise NotImplementedError
+
+    def predict_(self, xtest):
+        raise NotImplementedError
+
+class DepletionRegressor(Regressor):
+    def fit_model(self, xtrain, ytrain):
+        raise NotImplementedError
 
 # Import antics
 __all__ = [

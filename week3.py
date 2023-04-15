@@ -141,22 +141,22 @@ GOAL_TEST = (1, 3, 5, 8, 10, 15, 20, 30, 40, 50, 60, 75, 90)
 
 if __name__ == "__main__":
     test_all_models([
-        RidgeCVRegression(),
-        GaussianRegression(),
-        LinearRegression(),
+        # RidgeCVRegression(),
+        # GaussianRegression(),
+        # LinearRegression(),
 
-        GLH1Regression((30, 69, 30)),
-        GLH1Regression((35, 59, 35)),
-        GLH1Regression((40, 49, 40)),
-        GLH1Regression((45, 39, 45)),
+        # GLH1Regression((30, 69, 30)),
+        # GLH1Regression((35, 59, 35)),
+        # GLH1Regression((40, 49, 40)),
+        # GLH1Regression((45, 39, 45)),
 
-        GLH2Regression((30, 69, 30)),
-        GLH2Regression((35, 59, 35)),
-        GLH2Regression((40, 49, 40)),
-        GLH2Regression((45, 39, 45)),
+        # GLH2Regression((30, 69, 30)),
+        # GLH2Regression((35, 59, 35)),
+        # GLH2Regression((40, 49, 40)),
+        # GLH2Regression((45, 39, 45)),
 
-        GLH3Regression((30, 69, 30)),
-        GLH3Regression((35, 59, 35)),
-        GLH3Regression((40, 49, 40)),
-        GLH3Regression((45, 39, 45)),
+        # GLH3Regression((30, 69, 30)),
+        # GLH3Regression((35, 59, 35)),
+        # GLH3Regression((40, 49, 40)),
+        # GLH3Regression((45, 39, 45)),
     ], sequential=False, to_test=GOAL_TEST)
