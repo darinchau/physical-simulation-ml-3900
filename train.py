@@ -1,3 +1,4 @@
+from __future__ import annotations
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
 from sklearn.linear_model import LinearRegression as Linear, RidgeCV, MultiTaskElasticNetCV, MultiTaskLassoCV, ElasticNetCV, LassoCV, BayesianRidge, OrthogonalMatchingPursuitCV, SGDRegressor as SGD, PassiveAggressiveRegressor as PassiveAggressive
@@ -51,6 +52,12 @@ class Regressor:
     # Sets the name of the input so that stuff is saved with names nicely
     def set_input_name(self, name):
         self._input_name = name
+
+    # If you use a neural network and you need to register the network with the prediction data,
+    # This is the method to call
+    def register_net_with_test(self, net: NeuralNetwork):
+        net.register_test_data(self._xtest, self._ytest)
+        return net
 
     @property
     def path(self):
@@ -114,6 +121,8 @@ class Regressor:
     def fit_model(self, inputs, raw_data, training_idx, verbose = False, skip_error = False):
         # Split data
         xtrain, xtest, ytrain, ytest = self.preprocess(inputs, raw_data, training_idx)
+        self._xtest = xtest
+        self._ytest = ytest
 
         # Train the model
         np.random.seed(12345)
@@ -327,7 +336,9 @@ class PassiveAggressiveRegression(MultipleRegressor):
 # - The neural network regressor should contain "fit" and "predict" methods
 # - The neural network should be straightforward enough to implement, almost frictionless from pytorch
 # - Then this model can be used like a regular model inside a regressor without much hassle
+# - We should not compromise to allow for test data access in fit method
 class NeuralNetwork(nn.Module):
+    # Now turns out this is a special wrapper around the nn module
     @virtual
     def init_net(self):
         # This will be called exactly once before training
@@ -335,17 +346,24 @@ class NeuralNetwork(nn.Module):
         raise NotImplementedError
 
     @virtual
-    def predict(self, x):
+    def forward(self, x):
         # Takes in an x and use your initialized model to get a y
         raise NotImplementedError
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self) -> None:
+        super().__init__()
+        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.init_net()
 
     @property
     def device(self):
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return self._device
+
+    def predict(self, x):
+        x = torch.tensor(x).to(self.device).float()
+        with torch.no_grad():
+            result = self.forward(x)
+        return result.cpu().numpy()
 
     def register_test_data(self, xtest, ytest):
         xtest_tensor = torch.tensor(xtest).to(self.device).float()
@@ -353,11 +371,11 @@ class NeuralNetwork(nn.Module):
         test_dataset = TensorDataset(xtest_tensor, ytest_tensor)
         test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
         self._test_dataloader = test_dataloader
-        self._input_size = xtest.shape[1]
+        # self.__input_size = xtest.shape[1]
 
-    @property
-    def summary(self):
-        return f"{summary(self, self._input_size, verbose=0)}"
+    # @property
+    # def summary(self):
+    #     return f"{summary(self, (1, self.__input_size), verbose=0)}"
 
     def fit(self, xtrain, ytrain,
             epochs = 10000,
@@ -465,7 +483,25 @@ class NeuralNetwork(nn.Module):
         train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=False)
         return train_dataloader
 
+# A sample implementation of a neural network
+class SimpleNet(NeuralNetwork):
+    def init_net(self):
+        self.fc = nn.Sequential(
+            nn.Linear(1, 10),
+            nn.Linear(10, 2193),
+        )
 
+    def forward(self, x):
+        return self.fc(x)
+
+class SimpleNetRegression(Regressor):
+    def fit(self, xtrain, ytrain):
+        model = self.register_net_with_test(SimpleNet())
+        return model.fit(xtrain, ytrain, model_name=self.model_name, input_name=f"First {xtrain.shape[0]}", path=self.path)
+
+    @property
+    def model_name(self):
+        return "SimpleNet Regression"
 
 #############################################################################################
 #### A hybrid regressor indicates that we train different regions using different models ####
@@ -671,7 +707,9 @@ __all__ = [
     "MultiTaskLassoCVRegression",
     "MultiTaskElasticNetCVRegression",
     "BayesianRidgeRegression",
+    "SimpleNetRegression",
     "GLH1Regression",
     "GLH2Regression",
     "GLH3Regression",
+    "GLH4Regression"
 ]

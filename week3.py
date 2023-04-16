@@ -31,7 +31,7 @@ def create_folder_directory(folder_path):
             i += 1
 
 # Get the first n inputs as inputs, data and train index
-def get_first_n_inputs(n):
+def get_first_n_inputs(n, use_e_density = False):
     inputs = np.arange(101)*0.75/100
     data = load_elec_potential()
     train_idx = list(range(n))
@@ -42,7 +42,8 @@ def get_first_n_inputs(n):
 def model_test(regressor: Regressor,
                to_test: Iterable[int],
                use_progress_bar = False,
-               verbose = False):
+               verbose = False,
+               use_e_density = False):
     # Create the path to save the datas
     model_name = regressor.model_name
 
@@ -150,5 +151,7 @@ if __name__ == "__main__":
         # GLH3Regression((35, 59, 35)),
         # GLH3Regression((40, 49, 40)),
         # GLH3Regression((45, 39, 45)),
-        DepletionVoltageRegression()
+
+        # GLH4Regression(),
+        SimpleNetRegression()
     ], sequential=True, to_test=GOAL_TEST)
