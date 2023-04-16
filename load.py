@@ -210,10 +210,8 @@ def make_static_plot(frame_errors, val_f, plot_name, path):
             # The indexing is on keys which is of the format "frame 123"
             # So all it does is to crop away the prepend
             if int(key[6:]) in (1, 5, 10, 20, 40, 60, 90):
-                # plot solid line for even indices
                 ax.plot([val_f(entry) for entry in list_values], label=f"First {key[6:]}")
             else:
-                # plot dotted line for odd indices
                 continue
 
         # add legend to the plot
@@ -233,9 +231,10 @@ def make_static_plot(frame_errors, val_f, plot_name, path):
 
 # Takes a path, reads the predictions inside and generate all sorts of animations/plots
 # If you want to add extra plots, this is the function you have to worry about
-def make_plots(path):
-    # Retreive the model name from the path
-    model_name = path.split("/")[-1]
+def make_plots(path, model_name = None):
+    # Retreive the model name from the path if the user did not provide explicitly
+    if model_name is None:
+        model_name = path.split("/")[-1]
 
     with h5py.File(f"{path}/predictions.h5", 'r') as f:
         # Keep note of the frame errors

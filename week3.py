@@ -74,7 +74,7 @@ def model_test(regressor: Regressor,
 
         # Fit the model
         try:
-            regressor.fit(inputs, data, train_idx, skip_error=True)
+            regressor.fit_model(inputs, data, train_idx, skip_error=True)
         except RegressorFitError as e:
             continue
 
@@ -150,4 +150,5 @@ if __name__ == "__main__":
         # GLH3Regression((35, 59, 35)),
         # GLH3Regression((40, 49, 40)),
         # GLH3Regression((45, 39, 45)),
-    ], sequential=False, to_test=GOAL_TEST)
+        DepletionVoltageRegression()
+    ], sequential=True, to_test=GOAL_TEST)

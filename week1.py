@@ -142,7 +142,7 @@ def train_mlp(inputs, data, training_idx, net, model_name = None):
 # Wrapper around raw code
 def train_gaussian_process(inputs, data, training_idx):
     # Train the model
-    model, err = GaussianRegression().fit(inputs, data, training_idx, verbose = True)
+    model, err = GaussianRegression().fit_model(inputs, data, training_idx, verbose = True)
 
     return model, err
 

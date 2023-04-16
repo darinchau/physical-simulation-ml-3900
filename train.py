@@ -35,7 +35,7 @@ class Regressor:
 
     @virtual
     # Takes in xtrain and ytrain and outputs the model. The outputted model will be saved to a self.model attribute
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         raise NotImplementedError
 
     @property
@@ -57,10 +57,6 @@ class Regressor:
         if not hasattr(self, "_path"):
             return ""
         return self._path
-
-    @property
-    def trained(self):
-        return hasattr(self, "_model")
 
     def predict(self, xtest):
         return self.model.predict(xtest)
@@ -115,14 +111,14 @@ class Regressor:
         return mse, worst
 
     # Preprocess, fit data, and calculate error
-    def fit(self, inputs, raw_data, training_idx, verbose = False, skip_error = False):
+    def fit_model(self, inputs, raw_data, training_idx, verbose = False, skip_error = False):
         # Split data
         xtrain, xtest, ytrain, ytest = self.preprocess(inputs, raw_data, training_idx)
 
         # Train the model
         np.random.seed(12345)
         try:
-            model = self.fit_model(xtrain, ytrain)
+            model = self.fit(xtrain, ytrain)
         except ValueError as e:
             if too_many_split(e):
                 raise RegressorFitError()
@@ -137,7 +133,7 @@ class Regressor:
         return err
 
 class GaussianRegression(Regressor):
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         # Define the kernel function
         kernel = RBF(length_scale=1.0)
 
@@ -154,7 +150,7 @@ class GaussianRegression(Regressor):
         return "Gaussian process"
 
 class LinearRegression(Regressor):
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         model =  Linear().fit(xtrain, ytrain)
         return model
 
@@ -166,7 +162,7 @@ class RidgeCVRegression(Regressor):
     def __init__(self, cv=5):
         self.cv = cv
 
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         # Fit the RidgeCV regression model on the training data
         model = RidgeCV(cv=self.cv).fit(xtrain, ytrain)
 
@@ -182,7 +178,7 @@ class MultiTaskElasticNetCVRegression(Regressor):
         self.l1_ratio = l1_ratio
         self.cv = cv
 
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         # Fit the MultiTaskElasticNetCV regression model on the training data
         model = MultiTaskElasticNetCV(l1_ratio=self.l1_ratio, cv=self.cv).fit(xtrain, ytrain)
 
@@ -198,7 +194,7 @@ class MultiTaskLassoCVRegression(Regressor):
     def __init__(self, cv=5):
         self.cv = cv
 
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         # Fit the MultiTaskLassoCV regression model on the training data
         model = MultiTaskLassoCV(cv=self.cv).fit(xtrain, ytrain)
 
@@ -224,7 +220,7 @@ class DecisionTreeRegression(Regressor):
         self.max_leaf_nodes = max_leaf_nodes
         self.min_impurity_decrease = min_impurity_decrease
 
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         return DecisionTree(criterion=self.criterion, splitter=self.splitter, max_depth=self.max_depth,
                                       min_samples_split=self.min_samples_split, min_samples_leaf=self.min_samples_leaf,
                                       min_weight_fraction_leaf=self.min_weight_fraction_leaf, max_features=self.max_features,
@@ -242,7 +238,7 @@ class DecisionTreeRegression(Regressor):
 #####################################################################################################################
 class MultipleRegressor(Regressor):
     # Preprocess, fit data, and calculate error
-    def fit(self, inputs, raw_data, training_idx, verbose = False, skip_error = False):
+    def fit_model(self, inputs, raw_data, training_idx, verbose = False, skip_error = False):
         # Split data
         xtrain, xtest, ytrain, ytest = self.preprocess(inputs, raw_data, training_idx)
 
@@ -255,7 +251,7 @@ class MultipleRegressor(Regressor):
         models = [None] * num_tasks
 
         for i in range(num_tasks):
-            models[i] = self.fit_model(xtrain, ytrain[:, i])
+            models[i] = self.fit(xtrain, ytrain[:, i])
 
         self._model = models
 
@@ -283,7 +279,7 @@ class BayesianRidgeRegression(MultipleRegressor):
         self.lambda_1 = lambda_1
         self.lambda_2 = lambda_2
 
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         return BayesianRidge(n_iter=self.n_iter, tol=self.tol, alpha_1=self.alpha_1, alpha_2=self.alpha_2,
                              lambda_1=self.lambda_1, lambda_2=self.lambda_2).fit(xtrain, ytrain)
 
@@ -300,7 +296,7 @@ class SGDRegression(MultipleRegressor):
         self.max_iter = max_iter
         self.tol = tol
 
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         return SGD(loss=self.loss, penalty=self.penalty, alpha=self.alpha, l1_ratio=self.l1_ratio,
                              max_iter=self.max_iter, tol=self.tol).fit(xtrain, ytrain)
 
@@ -315,13 +311,161 @@ class PassiveAggressiveRegression(MultipleRegressor):
         self.max_iter = max_iter
         self.tol = tol
 
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         return PassiveAggressive(C=self.C, fit_intercept=self.fit_intercept,
                                           max_iter=self.max_iter, tol=self.tol).fit(xtrain, ytrain)
 
     @property
     def model_name(self):
         return "Passive Aggressive Regressor"
+
+#########################################################################################
+#### This is the third iteration of the neural network class lol let's hope it works ####
+#########################################################################################
+
+# The design philosophy is based on the following:
+# - The neural network regressor should contain "fit" and "predict" methods
+# - The neural network should be straightforward enough to implement, almost frictionless from pytorch
+# - Then this model can be used like a regular model inside a regressor without much hassle
+class NeuralNetwork(nn.Module):
+    @virtual
+    def init_net(self):
+        # This will be called exactly once before training
+        # Initialize everything here
+        raise NotImplementedError
+
+    @virtual
+    def predict(self, x):
+        # Takes in an x and use your initialized model to get a y
+        raise NotImplementedError
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.init_net()
+
+    @property
+    def device(self):
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def register_test_data(self, xtest, ytest):
+        xtest_tensor = torch.tensor(xtest).to(self.device).float()
+        ytest_tensor = torch.tensor(ytest).to(self.device).float()
+        test_dataset = TensorDataset(xtest_tensor, ytest_tensor)
+        test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+        self._test_dataloader = test_dataloader
+        self._input_size = xtest.shape[1]
+
+    @property
+    def summary(self):
+        return f"{summary(self, self._input_size, verbose=0)}"
+
+    def fit(self, xtrain, ytrain,
+            epochs = 10000,
+            validate_every = 100,
+            model_name = "",
+            input_name = "",
+            path = "./",
+            save_model = True,
+            show_logs = True):
+
+        # Turn the train data into a dataloader
+        train_dataloader = self.make_dataloader(xtrain, ytrain)
+
+        # Start training
+        net = self.to(self.device)
+        optimizer = optim.SGD(net.parameters(), lr=0.01)
+        criterion = nn.MSELoss()
+
+        history = {
+            'train_x': [],
+            'train_y': [],
+            'test_x': [],
+            'test_y': [],
+            'test_y_train_loss': []
+        }
+
+        for i in range(epochs):
+            train_loss = self.train_net(train_dataloader, net, optimizer, criterion, history, i)
+
+            # Skip the testing if it is not the "validate every" part
+            if i % validate_every != 0:
+                continue
+            self.test_net(net, criterion, history, i, train_loss, epochs, show_logs)
+
+        self.plot_history(model_name, input_name, path, history)
+
+        if save_model:
+            self.save_model(input_name, path, net)
+
+        return self
+
+    def train_net(self, train_dataloader, net, optimizer, criterion, history, i):
+        train_loss = 0.0
+        for data, target in train_dataloader:
+                # Zero the gradients
+            optimizer.zero_grad()
+
+                # Forward pass
+            output = net(data)
+            loss = criterion(output, target)
+
+                # Backward pass
+            loss.backward()
+
+                # Update the parameters
+            optimizer.step()
+
+                # Accumulate the training loss
+            train_loss += loss.item()
+
+            # Calculate the average training loss
+        train_loss /= len(train_dataloader)
+
+            # Save the training and test loss for plotting
+        history['train_x'].append(i)
+        history['train_y'].append(train_loss)
+        return train_loss
+
+    def test_net(self, net, criterion, history, i, train_loss, epochs, show_logs):
+        test_loss = 0.0
+        with torch.no_grad():
+            for data, target in self._test_dataloader:
+                    # Forward pass
+                output = net(data)
+                loss = criterion(output, target)
+
+                    # Accumulate the test loss
+                test_loss += loss.item()
+
+        if show_logs:
+            print(f"Trained {i+1}/{epochs} epochs with train loss: {train_loss}, test loss: {test_loss}")
+
+            # Save the training and test loss for plotting
+        history['test_x'].append(i)
+        history['test_y'].append(test_loss)
+        history['test_y_train_loss'].append(train_loss)
+
+    def save_model(self, input_name, path, net):
+        model_scripted = torch.jit.script(net) # Export to TorchScript
+        model_scripted.save(f'{path}/{input_name}epochs.pt')
+
+    def plot_history(self, model_name, input_name, path, history):
+        fig, ax = plt.subplots()
+        ax.plot(history['train_x'], history['train_y'])
+        ax.plot(history['test_x'], history['test_y'])
+        ax.set_yscale('log')
+        ax.legend(['Train Error', 'Test Error'])
+        ax.set_title(f"Train/Test Error over epochs for training {model_name} on {input_name}")
+        fig.savefig(f"{path}/{input_name} training details.png")
+
+    def make_dataloader(self, xtrain, ytrain):
+        xtrain_tensor = torch.tensor(xtrain).to(self.device).float()
+        ytrain_tensor = torch.tensor(ytrain).to(self.device).float()
+        train_dataset = TensorDataset(xtrain_tensor, ytrain_tensor)
+        train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=False)
+        return train_dataloader
+
+
 
 #############################################################################################
 #### A hybrid regressor indicates that we train different regions using different models ####
@@ -337,7 +481,7 @@ class HybridRegressor(Regressor):
 # Idea 1: Use Gaussian and Linear mix because linear performs quite well on the sides
 # but Gaussian performs quite well in the middle
 class GLH1Regression(HybridRegressor):
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         # Outer region size
         outer_size = self.region_size[0]
         inner_size = self.region_size[1]
@@ -379,7 +523,7 @@ class GLH1Regression(HybridRegressor):
 
 # Idea 1.1: Use the same linear model to predict the sides, and then also feed that data into the gaussian model
 class GLH2Regression(HybridRegressor):
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         outer_size = self.region_size[0]
         inner_size = self.region_size[1]
 
@@ -428,7 +572,7 @@ class GLH2Regression(HybridRegressor):
 
 # Idea 1.2: what if we feed the entire linear model into the Gaussian model and see what happens?
 class GLH3Regression(HybridRegressor):
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         outer_size = self.region_size[0]
         inner_size = self.region_size[1]
 
@@ -474,12 +618,15 @@ class GLH3Regression(HybridRegressor):
 # and we try to use that little bit of smoothness to guess where the change might occur
 # So we first look at the results really hard, and try to guess at what voltage the depletion might start to occur
 # And then use said depletion voltage to guess rest of the term
-class DepletionVoltageRegression(Regressor):
+class GLH4Regression(Regressor):
     def __init__(self, use_first_n_for_linear = 5):
         self.linear_component_N = use_first_n_for_linear
 
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         N = self.linear_component_N
+        if xtrain.shape[0] < N:
+            raise RegressorFitError("Too few training data")
+
         linear_component = Linear().fit(xtrain[:N], ytrain[:N])
 
         # Make the error terms
@@ -505,10 +652,16 @@ class DepletionVoltageRegression(Regressor):
         err_component = err.predict(xtest)
         return err_component * norm + lin_component
 
+    @property
+    def model_name(self):
+        return "Gaussian Linear Hybrid 4"
+
+
 
 # Import antics
 __all__ = [
     "Regressor",
+    "RegressorFitError",
     "DecisionTreeRegression",
     "RidgeCVRegression",
     "GaussianRegression",
@@ -518,7 +671,6 @@ __all__ = [
     "MultiTaskLassoCVRegression",
     "MultiTaskElasticNetCVRegression",
     "BayesianRidgeRegression",
-    "SimpleNNRegressor",
     "GLH1Regression",
     "GLH2Regression",
     "GLH3Regression",

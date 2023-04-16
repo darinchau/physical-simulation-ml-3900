@@ -75,7 +75,7 @@ class NeuralNetworkRegressor(Regressor):
 
 
     # Preprocess, fit data, and calculate error
-    def fit(self, inputs, raw_data, training_idx, verbose = False, skip_error = False):
+    def fit_model(self, inputs, raw_data, training_idx, verbose = False, skip_error = False):
         # Set random seed for reproducible result
         np.random.seed(12345)
 
@@ -85,13 +85,15 @@ class NeuralNetworkRegressor(Regressor):
         # Wrap everything in dataloaders to prepare for training
         # Convert numpy arrays to PyTorch tensors and move to device
         xtrain_tensor = torch.tensor(xtrain).to(self._device).float()
-        xtest_tensor = torch.tensor(xtest).to(self._device).float()
         ytrain_tensor = torch.tensor(ytrain).to(self._device).float()
+
+        xtest_tensor = torch.tensor(xtest).to(self._device).float()
         ytest_tensor = torch.tensor(ytest).to(self._device).float()
 
         train_dataset = TensorDataset(xtrain_tensor, ytrain_tensor)
-        test_dataset = TensorDataset(xtest_tensor, ytest_tensor)
         train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+
+        test_dataset = TensorDataset(xtest_tensor, ytest_tensor)
         test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
         # Begin the training
@@ -201,7 +203,7 @@ class NeuralNetworkRegressor(Regressor):
 
         return err
 
-    def fit_model(self, xtrain, ytrain):
+    def fit(self, xtrain, ytrain):
         raise NotImplementedError
 
     @virtual

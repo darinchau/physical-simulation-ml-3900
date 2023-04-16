@@ -182,7 +182,7 @@ def model_test(regressor: Regressor,
 
         # Fit the model
         try:
-            regressor.fit(inputs, data, train_idx, skip_error=True)
+            regressor.fit_model(inputs, data, train_idx, skip_error=True)
         except ValueError as e:
             if too_many_split(e) is True:
                 continue
