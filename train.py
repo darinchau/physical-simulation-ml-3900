@@ -12,10 +12,20 @@ import torch.optim as optim
 from torchinfo import summary
 from numpy import log
 import matplotlib.pyplot as plt
+import re
 
 # Filter all warnings
 import warnings
 warnings.filterwarnings('ignore')
+
+class RegressorFitError(Exception):
+    pass
+
+# Returns true if the pattern says the number of splits is ass
+def too_many_split(e: ValueError):
+    st = e.args[0]
+    pattern = r"^Cannot have number of splits n_splits=[0-9]* greater than the number of samples: n_samples=[0-9]*.$"
+    return bool(re.match(pattern, st))
 
 class Regressor:
     @property
@@ -111,7 +121,13 @@ class Regressor:
 
         # Train the model
         np.random.seed(12345)
-        model = self.fit_model(xtrain, ytrain)
+        try:
+            model = self.fit_model(xtrain, ytrain)
+        except ValueError as e:
+            if too_many_split(e):
+                raise RegressorFitError()
+            else:
+                raise e
 
         self._model = model
 
@@ -307,253 +323,6 @@ class PassiveAggressiveRegression(MultipleRegressor):
     def model_name(self):
         return "Passive Aggressive Regressor"
 
-
-### The following implements neural networks in a better way (than week 2)
-### The difference being we hide the training code in a separate class
-# Helper function to determine whether to stop training or not
-# Stop training if derivative says that the function is flat, or train/test error deviates too much
-USE_LAST_N = 5
-def should_exit_early(train_last_, test_last_):
-    # Return some madeup value to not trigger stuff
-    if len(test_last_) < USE_LAST_N:
-        return False
-
-    if len(test_last_) > USE_LAST_N:
-        print("Wrong indexing!")
-        return True
-
-    # First derivative
-    window_size = 3
-
-    first_ds = []
-    second_ds = []
-    h = 0.01
-
-    for i in range(USE_LAST_N - window_size + 1):
-        # Estimates f'(b)
-        a, b, c = test_last_[i: i + window_size]
-        f_prime_b = (c - a) / (2*h)
-        fpp_b = (a + c - 2*b)/h/h
-        first_ds.append(f_prime_b)
-        second_ds.append(fpp_b)
-
-    fp = sum(first_ds)/(USE_LAST_N-window_size+1)
-    sp = sum(second_ds)/(USE_LAST_N-window_size+1)
-
-    if abs(fp) < 0.005 and abs(sp) < 0.005:
-        return True
-
-    for tr, te in zip(train_last_, test_last_):
-        if tr > te:
-            return False
-        if abs(log(te) - log(tr)) < 0.75:
-            return False
-
-    return True
-
-# With this wrapper class we can use Neural Net Model like a normal model
-class NeuralNetModel(nn.Module):
-    @virtual
-    # This will be called exactly once before training
-    def init_net(self):
-        raise NotImplementedError
-
-    @virtual
-    # This will be called to predict stuff
-    def predict_(self, xtest):
-        raise NotImplementedError
-
-    # The actual predict will be called with a wrap to convert between tensor and numpy
-    def predict(self, xtest):
-        with torch.no_grad():
-            xtest_tensor = torch.tensor(xtest).to(self._device).float()
-            result_ = self.predict_(xtest_tensor)
-        return result_.cpu().numpy()
-
-    def __init__(self):
-        super(NeuralNetModel, self).__init__()
-        self.trained = False
-        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    def forward(self, x):
-        return self.predict_(x)
-
-    # A neural net has to have 2 things: fit (using xtrain and ytrain) and predict (using xtest)
-    def fit(self, xtrain, ytrain, xtest, ytest,
-            num_epochs_ = (100, 100),
-            model_name = "",
-            input_name = "",
-            path = "./",
-            save_model = True,
-            show_logs = True,
-            exit_early = True):
-
-        # Wrap everything in dataloaders to prepare for training
-        # Convert numpy arrays to PyTorch tensors and move to device
-        xtrain_tensor = torch.tensor(xtrain).to(self._device).float()
-        xtest_tensor = torch.tensor(xtest).to(self._device).float()
-        ytrain_tensor = torch.tensor(ytrain).to(self._device).float()
-        ytest_tensor = torch.tensor(ytest).to(self._device).float()
-
-        train_dataset = TensorDataset(xtrain_tensor, ytrain_tensor)
-        test_dataset = TensorDataset(xtest_tensor, ytest_tensor)
-        train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
-        test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=False)
-
-        # Initialize the net (the layers)
-        self.init_net()
-
-        # Start training
-        net = self.to(self._device)
-        optimizer = optim.SGD(net.parameters(), lr=0.01)
-        criterion = nn.MSELoss()
-
-        history = {
-            'train_x': [],
-            'train_y': [],
-            'test_x': [],
-            'test_y': [],
-            'test_y_train_loss': []
-        }
-
-        # Define the number of epochs to train
-        num_epochs, num_training_per_epoch = num_epochs_
-
-        num_trains = 0
-        epoch = 0
-
-        # Train the neural network
-        while True:
-            # Train N times for each test
-            for _ in range(num_training_per_epoch):
-                train_loss = 0.0
-                for _, (data, target) in enumerate(train_dataloader):
-                    # Zero the gradients
-                    optimizer.zero_grad()
-
-                    # Forward pass
-                    output = net(data)
-                    loss = criterion(output, target)
-
-                    # Backward pass
-                    loss.backward()
-
-                    # Update the parameters
-                    optimizer.step()
-
-                    # Accumulate the training loss
-                    train_loss += loss.item()
-
-                # Calculate the average training loss
-                train_loss /= len(train_dataloader)
-
-                num_trains += 1
-
-                # Save the training and test loss for plotting
-                history['train_x'].append(num_trains)
-                history['train_y'].append(train_loss)
-
-            # Evaluate the neural network on the test set
-            test_loss = 0.0
-
-            # Evaluate the model
-            with torch.no_grad():
-                for data, target in test_dataloader:
-                    # Move the data and target to the device
-                    data, target = data, target
-
-                    # Forward pass
-                    output = net(data)
-                    loss = criterion(output, target)
-
-                    # Accumulate the test loss
-                    test_loss += loss.item()
-
-            # Calculate the average test loss
-            test_loss /= len(test_dataloader)
-
-            # Save the training and test loss for plotting
-            history['test_x'].append(num_trains)
-            history['test_y'].append(test_loss)
-            history['test_y_train_loss'].append(history['train_y'][-1])
-
-            # Incerement number of epochs
-            epoch += 1
-
-            # Print logs
-            if show_logs:
-                print(f"Trained {epoch}/{num_epochs} epochs for {model_name} on {input_name}")
-
-            # Use derivative checking to exit early if necessary
-            # If train error drops below test error too much we also start to worry that it will overfit
-            if exit_early and should_exit_early(history['test_y_train_loss'][-USE_LAST_N:], history['test_y'][-USE_LAST_N:]):
-                break
-
-            # Exit if enough epochs
-            if epoch >= num_epochs:
-                break
-
-        # Plot the training details
-        fig, ax = plt.subplots()
-        ax.plot(history['train_x'], history['train_y'])
-        ax.plot(history['test_x'], history['test_y'])
-        ax.set_yscale('log')
-        ax.legend(['Train Error', 'Test Error'])
-        ax.set_title(f"Train/Test Error over epochs for training {model_name} on {input_name}")
-        fig.savefig(f"{path}/{input_name} training details.png")
-
-        # Save the model if needed
-        if save_model:
-            model_scripted = torch.jit.script(net) # Export to TorchScript
-            model_scripted.save(f'{path}/{input_name}_{num_epochs}epochs.pt')
-
-        # Set a flag
-        self.trained = True
-
-        return self
-
-# Any regressor that contains a neural net should inherit from this class
-# This gives us access to xtest and ytest during the fitting process
-class NeuralNetRegressor(Regressor):
-    @virtual
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
-        raise NotImplementedError
-
-    def fit(self, inputs, raw_data, training_idx, verbose=False, skip_error=False):
-        # Split data
-        xtrain, xtest, ytrain, ytest = self.preprocess(inputs, raw_data, training_idx)
-
-        # Train the model
-        np.random.seed(12345)
-        model = self.fit_model(xtrain, ytrain, xtest, ytest)
-
-        self._model = model
-
-        # Calculate and return error
-        err = self.calculate_error(xtest, ytest, skip_error, verbose)
-
-        return err
-
-# We can define custom models and regressors for said models minimally
-class Week3Net1(NeuralNetModel):
-    def init_net(self):
-        self.fc = nn.Linear(1, 2193)
-
-    def predict_(self, xtest):
-        return self.fc(xtest)
-
-# A wrapper class for Week 3 net 1
-class SimpleNNRegressor(NeuralNetRegressor):
-    def fit_model(self, xtrain, ytrain, xtest, ytest):
-        return Week3Net1().fit(xtrain, ytrain, xtest, ytest,
-                               model_name = self.model_name,
-                               input_name = self._input_name,
-                               path = self.path)
-
-    @property
-    def model_name(self):
-        return "Week 3 Neural net 1"
-
 #############################################################################################
 #### A hybrid regressor indicates that we train different regions using different models ####
 #############################################################################################
@@ -688,13 +457,14 @@ class GLH3Regression(HybridRegressor):
 
         y_pred = y_pred.reshape((-1, 129, 17))
         y_pred[:, outer_size:-outer_size, :] = inner
-        y_pred = y_pred.reshape((-1, 129*17))
+        y_pred = y_pred.reshape((-1, 129 * 17))
 
         return y_pred
 
     @property
     def model_name(self):
         return "Gaussian Linear Hybrid 3"
+
 
 # Idea 2. The linear model seems to predict the datas really well.
 # Could we try to predict the potential increase part and the depletion part separately?
@@ -704,16 +474,37 @@ class GLH3Regression(HybridRegressor):
 # and we try to use that little bit of smoothness to guess where the change might occur
 # So we first look at the results really hard, and try to guess at what voltage the depletion might start to occur
 # And then use said depletion voltage to guess rest of the term
-class DepletionVoltageGuesser(NeuralNetModel):
-    def init_net(self):
-        raise NotImplementedError
+class DepletionVoltageRegression(Regressor):
+    def __init__(self, use_first_n_for_linear = 5):
+        self.linear_component_N = use_first_n_for_linear
 
-    def predict_(self, xtest):
-        raise NotImplementedError
-
-class DepletionRegressor(Regressor):
     def fit_model(self, xtrain, ytrain):
-        raise NotImplementedError
+        N = self.linear_component_N
+        linear_component = Linear().fit(xtrain[:N], ytrain[:N])
+
+        # Make the error terms
+        pred = linear_component.predict(xtrain)
+        norm = np.max(np.abs(pred - ytrain))
+        error = (ytrain - pred)/norm
+
+        # Train the error terms over another model. Let's try Gaussian for now
+        kernel = RBF(length_scale=1.0)
+
+        # Define the Gaussian Process Regression model
+        model = GaussianProcessRegressor(kernel=kernel, alpha=1e-5, n_restarts_optimizer=10)
+
+        # Train the model on the training data
+        model.fit(xtrain, error)
+
+        return (linear_component, model, norm)
+
+
+    def predict(self, xtest):
+        (lin, err, norm) = self.model
+        lin_component = lin.predict(xtest)
+        err_component = err.predict(xtest)
+        return err_component * norm + lin_component
+
 
 # Import antics
 __all__ = [

@@ -9,19 +9,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from train import *
 from tqdm import tqdm
-import re
 from multiprocessing import Process
 from typing import Iterable
 import h5py
 
 # The place to store all your datas
 PATH_PREPEND = "./Datas/Week 3"
-
-# Returns true if the pattern says the number of splits is ass
-def too_many_split(e: ValueError):
-    st = e.args[0]
-    pattern = r"^Cannot have number of splits n_splits=[0-9]* greater than the number of samples: n_samples=[0-9]*.$"
-    return bool(re.match(pattern, st))
 
 # Create a folder and if folder exists, remove/overwrite everything inside :D
 def create_folder_directory(folder_path):
@@ -82,10 +75,8 @@ def model_test(regressor: Regressor,
         # Fit the model
         try:
             regressor.fit(inputs, data, train_idx, skip_error=True)
-        except ValueError as e:
-            if too_many_split(e) is True:
-                continue
-            raise e
+        except RegressorFitError as e:
+            continue
 
         # Calculate the model and compare with actual data
         pred = regressor.predict(inputs.reshape((-1, 1))).reshape((101, 129, 17))
