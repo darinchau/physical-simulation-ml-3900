@@ -32,7 +32,10 @@ def create_folder_directory(folder_path):
 
 # Get the first n inputs as inputs, data and train index
 def get_first_n_inputs(n, use_e_density = False):
-    inputs = np.arange(101)*0.75/100
+    inputs = (np.arange(101)*0.75/100).reshape((101, 1))
+    if use_e_density:
+        e_density = load_e_density().reshape((101, 2193))
+        inputs = np.concatenate([inputs, e_density], axis = 1)
     data = load_elec_potential()
     train_idx = list(range(n))
     return inputs, data, train_idx
@@ -47,7 +50,14 @@ def model_test(regressor: Regressor,
     # Create the path to save the datas
     model_name = regressor.model_name
 
-    path = f"{PATH_PREPEND}/{model_name}"
+    # Exit early if the model does not interop with electron density
+    if use_e_density and not regressor.can_use_electron_density:
+        return
+
+    if use_e_density:
+        path = f"{PATH_PREPEND}/{model_name} edensity"
+    else:
+        path = f"{PATH_PREPEND}/{model_name}"
     path = create_folder_directory(path)
     logs_file = f"{path}/{model_name} logs.txt"
 
@@ -71,7 +81,9 @@ def model_test(regressor: Regressor,
         regressor.set_input_name(f"first {n}")
 
         # Preprocess the data
-        inputs, data, train_idx = get_first_n_inputs(n)
+        inputs, data, train_idx = get_first_n_inputs(n, use_e_density)
+
+        num_features = inputs.shape[1]
 
         # Fit the model
         try:
@@ -80,7 +92,7 @@ def model_test(regressor: Regressor,
             continue
 
         # Calculate the model and compare with actual data
-        pred = regressor.predict(inputs.reshape((-1, 1))).reshape((101, 129, 17))
+        pred = regressor.predict(inputs.reshape((-1, num_features))).reshape((101, 129, 17))
 
         # Save all the predictions
         predictions[f"frame {n}"] = pred
@@ -96,6 +108,10 @@ def model_test(regressor: Regressor,
     # Write the training info of the regressor (mostly hyperparameters)
     with open(logs_file, "w", encoding="utf-8") as f:
         f.write(regressor.train_info)
+        if use_e_density:
+            f.write("\n\n Trained with electron density")
+        else:
+            f.write("\n\n Trained without electron density")
 
     # Make some animations
     make_plots(path, model_name)
@@ -105,22 +121,22 @@ def model_test(regressor: Regressor,
 ############################################
 
 # For parallel model testing
-def execute_test(model, num_to_test):
-    model_test(model, to_test=num_to_test, verbose=True, use_progress_bar=False)
+def execute_test(model, num_to_test, use_e_density):
+    model_test(model, to_test=num_to_test, verbose=True, use_progress_bar=False, use_e_density=use_e_density)
 
 # Sequentially/Parallelly(?) train all models and test the results
 # calculates using the first num_to_test results
 # if sequential, show progress bar if pbar
-def test_all_models(models, sequential, to_test, pbar=False):
+def test_all_models(models, sequential, to_test, pbar=False, use_e_density = False):
     t = time.time()
 
     if sequential:
         for model in models:
-            model_test(model, to_test, verbose=False, use_progress_bar=pbar)
+            model_test(model, to_test, verbose=False, use_progress_bar=pbar, use_e_density=use_e_density)
     else:
         processes: list[Process] = []
         for model in models:
-            p = Process(target=execute_test, args=(model, to_test))
+            p = Process(target=execute_test, args=(model, to_test, use_e_density))
             p.start()
             processes.append(p)
         for p in processes:
@@ -132,26 +148,21 @@ def test_all_models(models, sequential, to_test, pbar=False):
 GOAL_TEST = (1, 3, 5, 8, 10, 15, 20, 30, 40, 50, 60, 75, 90)
 
 if __name__ == "__main__":
+    # test_all_models([
+    #     RidgeCVRegression(),
+    #     GaussianRegression(),
+    #     LinearRegression(),
+    #     SGDRegression(),
+    #     MultiTaskLassoCVRegression(),
+    #     MultiTaskElasticNetCVRegression(),
+    #     BayesianRidgeRegression(),
+    #     # GLH1Regression(),
+    #     # GLH2Regression(),
+    #     # GLH3Regression(),
+    #     # GLH4Regression(),
+    #     # SimpleNetRegression()
+    # ], sequential=True, to_test=GOAL_TEST, use_e_density=True)
+
     test_all_models([
-        # RidgeCVRegression(),
-        # GaussianRegression(),
-        # LinearRegression(),
-
-        # GLH1Regression((30, 69, 30)),
-        # GLH1Regression((35, 59, 35)),
-        # GLH1Regression((40, 49, 40)),
-        # GLH1Regression((45, 39, 45)),
-
-        # GLH2Regression((30, 69, 30)),
-        # GLH2Regression((35, 59, 35)),
-        # GLH2Regression((40, 49, 40)),
-        # GLH2Regression((45, 39, 45)),
-
-        # GLH3Regression((30, 69, 30)),
-        # GLH3Regression((35, 59, 35)),
-        # GLH3Regression((40, 49, 40)),
-        # GLH3Regression((45, 39, 45)),
-
-        # GLH4Regression(),
-        SimpleNetRegression()
-    ], sequential=True, to_test=GOAL_TEST)
+        TCEPRegression()
+    ], sequential=True, to_test=(5, 8, 10), use_e_density=False)

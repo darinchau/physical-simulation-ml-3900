@@ -14,6 +14,7 @@ from torchinfo import summary
 from numpy import log
 import matplotlib.pyplot as plt
 import re
+import math
 
 # Filter all warnings
 import warnings
@@ -53,10 +54,24 @@ class Regressor:
     def set_input_name(self, name):
         self._input_name = name
 
+    @property
+    def can_use_electron_density(self):
+        return True
+
+    @property
+    def model_structure(self):
+        # A property for model structure
+        if not hasattr(self, "_model_structure"):
+            self._model_structure = []
+        return self._model_structure
+
     # If you use a neural network and you need to register the network with the prediction data,
-    # This is the method to call
-    def register_net_with_test(self, net: NeuralNetwork):
+    # Net initialization will be called here
+    def register_net(self, net: NeuralNetwork):
+        input_size = self._xtest.shape[1]
+        net.init_net(input_size)
         net.register_test_data(self._xtest, self._ytest)
+        self.model_structure.append(f"{summary(net, (1, input_size), verbose=0)}")
         return net
 
     @property
@@ -75,6 +90,8 @@ class Regressor:
             if k[0] == "_":
                 continue
             st += f"\n{k} = {str(v)}"
+        structures = "\n\n".join([str(x) for x in self.model_structure])
+        st += structures
         return st
 
     def preprocess(self, inputs, raw_data, training_idx):
@@ -93,10 +110,6 @@ class Regressor:
         # Create the data
         xtrain, xtest = inputs[train_idx], inputs[test_idx]
         ytrain, ytest = data[train_idx], data[test_idx]
-
-        if len(xtrain.shape) == 1:
-            xtrain = xtrain.reshape(-1, 1)
-            xtest = xtest.reshape(-1, 1)
 
         return xtrain, xtest, ytrain, ytest
 
@@ -135,11 +148,6 @@ class Regressor:
                 raise e
 
         self._model = model
-
-        # Calculate and return error
-        err = self.calculate_error(xtest, ytest, skip_error, verbose)
-
-        return err
 
 class GaussianRegression(Regressor):
     def fit(self, xtrain, ytrain):
@@ -264,10 +272,6 @@ class MultipleRegressor(Regressor):
 
         self._model = models
 
-        err = self.calculate_error(xtest, ytest, skip_error, verbose)
-
-        return err
-
     def predict(self, xtest):
         num_tasks = len(self._model)
         num_samples = len(xtest)
@@ -340,7 +344,7 @@ class PassiveAggressiveRegression(MultipleRegressor):
 class NeuralNetwork(nn.Module):
     # Now turns out this is a special wrapper around the nn module
     @virtual
-    def init_net(self):
+    def init_net(self, input_size):
         # This will be called exactly once before training
         # Initialize everything here
         raise NotImplementedError
@@ -353,7 +357,6 @@ class NeuralNetwork(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.init_net()
 
     @property
     def device(self):
@@ -485,9 +488,9 @@ class NeuralNetwork(nn.Module):
 
 # A sample implementation of a neural network
 class SimpleNet(NeuralNetwork):
-    def init_net(self):
+    def init_net(self, input_size):
         self.fc = nn.Sequential(
-            nn.Linear(1, 10),
+            nn.Linear(input_size, 10),
             nn.Linear(10, 2193),
         )
 
@@ -496,7 +499,7 @@ class SimpleNet(NeuralNetwork):
 
 class SimpleNetRegression(Regressor):
     def fit(self, xtrain, ytrain):
-        model = self.register_net_with_test(SimpleNet())
+        model = self.register_net(SimpleNet())
         return model.fit(xtrain, ytrain, model_name=self.model_name, input_name=f"First {xtrain.shape[0]}", path=self.path)
 
     @property
@@ -557,6 +560,10 @@ class GLH1Regression(HybridRegressor):
     def model_name(self):
         return "Gaussian Linear Hybrid 1"
 
+    @property
+    def can_use_electron_density(self):
+        return False
+
 # Idea 1.1: Use the same linear model to predict the sides, and then also feed that data into the gaussian model
 class GLH2Regression(HybridRegressor):
     def fit(self, xtrain, ytrain):
@@ -606,6 +613,10 @@ class GLH2Regression(HybridRegressor):
     def model_name(self):
         return "Gaussian Linear Hybrid 2"
 
+    @property
+    def can_use_electron_density(self):
+        return False
+
 # Idea 1.2: what if we feed the entire linear model into the Gaussian model and see what happens?
 class GLH3Regression(HybridRegressor):
     def fit(self, xtrain, ytrain):
@@ -644,6 +655,10 @@ class GLH3Regression(HybridRegressor):
     @property
     def model_name(self):
         return "Gaussian Linear Hybrid 3"
+
+    @property
+    def can_use_electron_density(self):
+        return False
 
 
 # Idea 2. The linear model seems to predict the datas really well.
@@ -692,7 +707,156 @@ class GLH4Regression(Regressor):
     def model_name(self):
         return "Gaussian Linear Hybrid 4"
 
+# Let's expand on idea 2 and build a regressor that retrains the second model with the last few predicted results
+class TCEPNet(NeuralNetwork):
+    def init_net(self, input_size):
+        self.voltage = nn.Linear(1, 1)
+        self.conv1 = nn.Conv2d(in_channels=5, out_channels=10, kernel_size=3, padding=0)
+        self.conv2 = nn.Conv2d(in_channels=10, out_channels=20, kernel_size=3, padding=0)
+        self.pool = nn.MaxPool2d(kernel_size=2)
+        self.conv3 = nn.Conv2d(in_channels=20, out_channels=30, kernel_size=3, padding=0)
+        self.conv4 = nn.Conv2d(in_channels=30, out_channels=40, kernel_size=3, padding=0)
+        self.flatten = nn.Flatten()
+        # Retreive the N used
+        self.N = int((input_size - 1)/2193)
 
+        # The final NN part
+        self.nn1 = nn.Linear(4641, 3000)
+        self.dropout = nn.Dropout(p=0.3)
+        self.nn2 = nn.Linear(3000, 2193)
+
+    def forward(self, x):
+        # Split into voltage part and error part
+        x_voltage = x[:, :1]
+        x_error = x[:, 1:].reshape((-1, self.N, 129, 17))
+
+        # Voltage part
+        x_voltage = self.voltage(x_voltage)
+
+        # Error part
+        # Shapes calcualted assuming batch size = 1
+        x_error = self.conv1(x_error) # (1, 10, 127, 15)
+        x_error = nn.functional.relu(x_error)
+        x_error = self.conv2(x_error) # (1, 20, 125, 13)
+        x_error = nn.functional.relu(x_error)
+        x_error = self.pool(x_error) # (1, 20, 62, 6)
+        x_error = self.conv3(x_error) # (1, 30, 60, 4)
+        x_error = nn.functional.relu(x_error)
+        x_error = self.conv4(x_error) # (1, 40, 58, 2)
+        x_error = nn.functional.relu(x_error)
+        x_error = self.flatten(x_error) # (1, 4640)
+
+        # Combine both parts
+        # Combine the two tensors
+        x = torch.cat((x_voltage, x_error), dim=1)
+        x = self.nn1(x)
+        x = self.dropout(x)
+        x = self.nn2(x)
+
+        return x
+
+
+# Time Convolution Error Prediction
+class TCEPRegression(Regressor):
+    def __init__(self, use_first_n_for_linear = 5):
+        self.linear_component_N = use_first_n_for_linear
+
+    # We do the training directly in fit_model so leave this unimplemented
+    def fit(self, xtrain, ytrain):
+        raise NotImplementedError
+
+    @property
+    def can_use_electron_density(self):
+        return False
+
+    def fit_model(self, inputs, raw_data, training_idx, verbose=False, skip_error=False):
+        N = self.linear_component_N
+
+        # Preprocess data
+        xtrain, xtest, ytrain, ytest = self.preprocess(inputs, raw_data, training_idx)
+
+        if xtrain.shape[0] < N:
+            raise RegressorFitError("Too few training data")
+
+        # Remerge x and y
+        x = np.concatenate([xtrain, xtest], axis = 0)
+        y = np.concatenate([ytrain, ytest], axis = 0)
+        num_total_datas = x.shape[0]
+
+        # Train the first model
+        np.random.seed(12345)
+        linear_model = Linear().fit(xtrain[:N], ytrain[:N])
+
+        # Calculate the error terms
+        linear_component = linear_model.predict(x).reshape((-1, 2193))
+        normalization_term = np.max(np.abs(y - linear_component))
+        error_terms = (y - linear_component)/normalization_term
+
+        # Make the error terms with strides for the second phase of training
+        # For example N = 5
+        # So first data will contain errors for frame 0, 1, 2, 3, 4, and error_y will contain error for frame 5
+        # We can use this piece of data to do something interesting
+        error_with_strides = np.zeros((num_total_datas-N, N, 2193))
+        error_y = np.zeros((num_total_datas-N, 2193))
+        for i in range(N, num_total_datas):
+            error_with_strides[i-N] = error_terms[i-N:i]
+            error_y[i-N] = error_terms[i]
+
+        error_with_strides = error_with_strides.reshape((-1, N*2193))
+
+        # Preprocessing for second phase of training
+        new_x = np.concatenate([x[N:], error_with_strides], axis = 1)
+        new_num_training_data = xtrain.shape[0] - N + 1
+
+        error_xtrain = new_x[:new_num_training_data]
+        error_xtest = new_x[new_num_training_data:]
+        error_ytrain = error_y[:new_num_training_data]
+        error_ytest = error_y[new_num_training_data:]
+
+        # Train CNN here
+        tcep = TCEPNet()
+        tcep.init_net(1 + N*2193)
+        tcep.register_test_data(error_xtest, error_ytest)
+        tcep.fit(error_xtrain, error_ytrain,
+                epochs = 2,
+                validate_every=1,
+                model_name=self.model_name,
+                input_name=f'{xtrain.shape[0]} datas',
+                path = self.path
+                )
+
+        errors = np.zeros((101, 2193))
+
+        errors[:N] = error_terms[:N]
+        errors[N:] = tcep.predict(new_x)
+
+        # Save the first few known results and stuff
+        self._model = (linear_model, tcep, errors, normalization_term)
+
+    def predict(self, xtest):
+        # Retrieve models
+        linear_model, tcep, errors, normalization_term = self.model
+        ypred = np.zeros((xtest.shape[0], 2193))
+        for i in range(xtest.shape[0]):
+            # Calculate the indices
+            # We need to extract a single feature but keep both dimensions, hence i:i+1
+            x = xtest[i:i+1]
+            ind = float(x/0.0075)
+            p = math.floor(ind)
+            n = math.ceil(ind)
+            a = ind - p
+
+            # Calculate the error term by linear regression
+            error = errors[p] * (1-a) + errors[n] * a
+            error = error * normalization_term
+            linear_part = linear_model.predict(x)
+            ypred[i] = linear_part + error
+
+        return ypred
+
+    @property
+    def model_name(self):
+        return "TCEP Model"
 
 # Import antics
 __all__ = [
@@ -711,5 +875,6 @@ __all__ = [
     "GLH1Regression",
     "GLH2Regression",
     "GLH3Regression",
-    "GLH4Regression"
+    "GLH4Regression",
+    "TCEPRegression"
 ]

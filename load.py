@@ -11,6 +11,7 @@ import h5py
 SPACING_X = np.load("mesh_data_x.npy")
 SPACING_Y = np.load("mesh_data_y.npy")
 ELECTRIC_POTENTIAL = np.load("mesh_data_electrostatic_potential.npy")
+ELECTRON_DENSITY = np.load("mesh_data_edensity.npy")
 
 def optimize_gif(path):
     # Uses the gifsicle library
@@ -26,7 +27,10 @@ def index_exclude(data, exclude):
 
 # Load and return data. We expect data to be some 3 dimensional np array (N, rows, cols).
 def load_elec_potential():
-    return ELECTRIC_POTENTIAL
+    return np.array(ELECTRIC_POTENTIAL)
+
+def load_e_density():
+    return np.nan_to_num(ELECTRON_DENSITY, nan=0)
 
 def split_data(ins, train_idx):
     return index_include(ins, train_idx), index_exclude(ins, train_idx)
