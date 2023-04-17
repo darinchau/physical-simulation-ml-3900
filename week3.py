@@ -30,11 +30,16 @@ def create_folder_directory(folder_path):
                 return new_path
             i += 1
 
+NO_E_DENSITY = 0
+USE_E_DENSITY = 1
+USE_NORMALIZED_E_DENSITY = 2
+
 # Get the first n inputs as inputs, data and train index
 def get_first_n_inputs(n, use_e_density = False):
     inputs = (np.arange(101)*0.75/100).reshape((101, 1))
     if use_e_density:
         e_density = load_e_density().reshape((101, 2193))
+        e_density /= np.max(e_density)
         inputs = np.concatenate([inputs, e_density], axis = 1)
     data = load_elec_potential()
     train_idx = list(range(n))
@@ -46,18 +51,26 @@ def model_test(regressor: Regressor,
                to_test: Iterable[int],
                use_progress_bar = False,
                verbose = False,
-               use_e_density = False):
+               use_e_density = NO_E_DENSITY):
     # Create the path to save the datas
     model_name = regressor.model_name
 
     # Exit early if the model does not interop with electron density
-    if use_e_density and not regressor.can_use_electron_density:
+    if not (use_e_density == NO_E_DENSITY or regressor.can_use_electron_density):
         return
 
-    if use_e_density:
+    if use_e_density == USE_E_DENSITY:
         path = f"{PATH_PREPEND}/{model_name} edensity"
-    else:
+    elif use_e_density == NO_E_DENSITY:
         path = f"{PATH_PREPEND}/{model_name}"
+    else:
+        path = f"{PATH_PREPEND}/{model_name} normed"
+
+    if use_e_density == USE_E_DENSITY:
+        model_name = f"{model_name} with electron density"
+    elif use_e_density == USE_NORMALIZED_E_DENSITY:
+        model_name = f"{model_name} with normalized electron density"
+
     path = create_folder_directory(path)
     logs_file = f"{path}/{model_name} logs.txt"
 
@@ -107,11 +120,9 @@ def model_test(regressor: Regressor,
     # Create the file and overwrite as blank if necessary
     # Write the training info of the regressor (mostly hyperparameters)
     with open(logs_file, "w", encoding="utf-8") as f:
+        f.write(model_name)
+        f.write("\n\n")
         f.write(regressor.train_info)
-        if use_e_density:
-            f.write("\n\n Trained with electron density")
-        else:
-            f.write("\n\n Trained without electron density")
 
     # Make some animations
     make_plots(path, model_name)
@@ -127,7 +138,7 @@ def execute_test(model, num_to_test, use_e_density):
 # Sequentially/Parallelly(?) train all models and test the results
 # calculates using the first num_to_test results
 # if sequential, show progress bar if pbar
-def test_all_models(models, sequential, to_test, pbar=False, use_e_density = False):
+def test_all_models(models, sequential, to_test, pbar=False, use_e_density = NO_E_DENSITY):
     t = time.time()
 
     if sequential:
@@ -147,42 +158,70 @@ def test_all_models(models, sequential, to_test, pbar=False, use_e_density = Fal
 # The values of n to test
 GOAL_TEST = (1, 3, 5, 8, 10, 15, 20, 30, 40, 50, 60, 75, 90)
 
+def task1():
+    test_all_models([
+        RidgeCVRegression(),
+        GaussianRegression(),
+        LinearRegression(),
+    ], sequential=False, to_test=GOAL_TEST, use_e_density=USE_E_DENSITY)
+
+def task2():
+    test_all_models([
+        RidgeCVRegression(),
+        GaussianRegression(),
+        LinearRegression(),
+        GLH1Regression(),
+        GLH2Regression(),
+        GLH3Regression(),
+        GLH4Regression(),
+    ], sequential=False, to_test=GOAL_TEST, use_e_density=USE_NORMALIZED_E_DENSITY)
+
+def task3():
+    test_all_models([
+        TCEPRegression(5),
+        TCEPRegression(20)
+    ], sequential=True, to_test=GOAL_TEST, use_e_density=NO_E_DENSITY)
+
+def task4():
+    test_all_models([
+        PolynomialRegression(1),
+        PolynomialRegression(2),
+        PolynomialRegression(3),
+        PolynomialRegression(4),
+        PolynomialRegression(5),
+        PolynomialRegression(6),
+        PolynomialRegression(7),
+        PolynomialRegression(8),
+    ], sequential=False, to_test=GOAL_TEST, use_e_density=NO_E_DENSITY)
+
+def task5():
+    test_all_models([
+        PolynomialRegression(2),
+    ], sequential=True, to_test=GOAL_TEST, use_e_density=USE_E_DENSITY)
+
+def task6():
+    test_all_models([
+        PolynomialRegression(2),
+    ], sequential=True, to_test=GOAL_TEST, use_e_density=USE_NORMALIZED_E_DENSITY)
+
+def task7():
+    test_all_models([
+        MultiTaskLassoCVRegression(),
+        MultiTaskElasticNetCVRegression(),
+        BayesianRidgeRegression(),
+        SGDRegression(),
+    ], sequential=True, to_test=GOAL_TEST, use_e_density=USE_NORMALIZED_E_DENSITY)
+
 if __name__ == "__main__":
-    # test_all_models([
-    #     RidgeCVRegression(),
-    #     GaussianRegression(),
-    #     LinearRegression(),
-    #     MultiTaskLassoCVRegression(),
-    #     MultiTaskElasticNetCVRegression(),
-    #     BayesianRidgeRegression(),
-    #     # GLH1Regression(),
-    #     # GLH2Regression(),
-    #     # GLH3Regression(),
-    #     # GLH4Regression(),
-    #     # SimpleNetRegression()
-    # ], sequential=True, to_test=GOAL_TEST, use_e_density=True)
+    task1()
+    task2()
+    task3()
+    task4()
+    task5()
+    task6()
+    task7()
 
-    # test_all_models([
-    #     TCEPRegression(20)
-    # ], sequential=True, to_test=GOAL_TEST, use_e_density=False)
-
-    # test_all_models([
-    #     PolynomialRegression(1),
-    #     PolynomialRegression(2),
-    #     PolynomialRegression(3),
-    #     PolynomialRegression(4),
-    #     PolynomialRegression(5),
-    #     PolynomialRegression(6),
-    #     PolynomialRegression(7),
-    #     PolynomialRegression(8),
-    # ], sequential=False, to_test=GOAL_TEST, use_e_density=False)
-
-    # test_all_models([
-    #     PolynomialRegression(3),
-    # ], sequential=True, to_test=GOAL_TEST, use_e_density=True)
-
-    # test_all_models([
-    #     LinearRegression()
-    # ], sequential=True, to_test=(10,), use_e_density=False)
-
-    anim = AnimationMaker()
+    # anim = AnimationMaker()
+    # anim.add_data(load_elec_potential(), "Electric potential")
+    # anim.add_data(load_e_density(), "Electron density")
+    # anim.save(path="./data.gif", suptitle="Data plots")

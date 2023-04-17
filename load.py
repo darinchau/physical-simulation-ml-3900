@@ -103,7 +103,7 @@ class AnimationMaker:
         self.height_ratios.append(1)
         return self
 
-    def save(self, path, title = ""):
+    def save(self, path, suptitle = ""):
         if self.nframes is None:
             raise ValueError("No data to plot")
 
@@ -120,7 +120,7 @@ class AnimationMaker:
         fig, axes = plt.subplots(num_data, 1, gridspec_kw={'height_ratios': self.height_ratios})
 
         # Figure title
-        fig.suptitle(title)
+        fig.suptitle(suptitle)
 
         # One axis one data
         for i in range(num_data):
@@ -130,7 +130,7 @@ class AnimationMaker:
 
                 axes[i].set_aspect("equal", adjustable="box")
                 axes[i].set_ylabel("Y", va="bottom")
-                axes[i].set_title(f"Original data")
+                axes[i].set_title(title)
                 axes[i].set_yticks([])
                 heatmap = axes[i].pcolormesh(x, y, np.transpose(data[0]), cmap="hot", vmin=vmin, vmax=vmax)
 
