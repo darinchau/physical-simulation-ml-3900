@@ -711,17 +711,20 @@ class GLH4Regression(Regressor):
 class TCEPNet(NeuralNetwork):
     def init_net(self, input_size):
         self.voltage = nn.Linear(1, 1)
-        self.conv1 = nn.Conv2d(in_channels=5, out_channels=10, kernel_size=3, padding=0)
-        self.conv2 = nn.Conv2d(in_channels=10, out_channels=20, kernel_size=3, padding=0)
+        N = self.N = int((input_size - 1)/2193)
+
+        self.conv1 = nn.Conv2d(in_channels=N, out_channels=2*N, kernel_size=3, padding=0)
+        self.conv2 = nn.Conv2d(in_channels=2*N, out_channels=4*N, kernel_size=3, padding=0)
         self.pool = nn.MaxPool2d(kernel_size=2)
-        self.conv3 = nn.Conv2d(in_channels=20, out_channels=30, kernel_size=3, padding=0)
-        self.conv4 = nn.Conv2d(in_channels=30, out_channels=40, kernel_size=3, padding=0)
+        self.conv3 = nn.Conv2d(in_channels=4*N, out_channels=6*N, kernel_size=3, padding=0)
+        self.conv4 = nn.Conv2d(in_channels=6*N, out_channels=8*N, kernel_size=3, padding=0)
         self.flatten = nn.Flatten()
-        # Retreive the N used
-        self.N = int((input_size - 1)/2193)
+
+        # 116 is 58 * 2 - check calculations below
+        final_num_features = 8*N*116 + 1
 
         # The final NN part
-        self.nn1 = nn.Linear(4641, 3000)
+        self.nn1 = nn.Linear(final_num_features, 3000)
         self.dropout = nn.Dropout(p=0.3)
         self.nn2 = nn.Linear(3000, 2193)
 
@@ -818,8 +821,8 @@ class TCEPRegression(Regressor):
         tcep.init_net(1 + N*2193)
         tcep.register_test_data(error_xtest, error_ytest)
         tcep.fit(error_xtrain, error_ytrain,
-                epochs = 2,
-                validate_every=1,
+                epochs = 500,
+                validate_every = 10,
                 model_name=self.model_name,
                 input_name=f'{xtrain.shape[0]} datas',
                 path = self.path
@@ -841,13 +844,7 @@ class TCEPRegression(Regressor):
             # Calculate the indices
             # We need to extract a single feature but keep both dimensions, hence i:i+1
             x = xtest[i:i+1]
-            ind = float(x/0.0075)
-            p = math.floor(ind)
-            n = math.ceil(ind)
-            a = ind - p
-
-            # Calculate the error term by linear regression
-            error = errors[p] * (1-a) + errors[n] * a
+            error = errors[int(x/0.0075)]
             error = error * normalization_term
             linear_part = linear_model.predict(x)
             ypred[i] = linear_part + error

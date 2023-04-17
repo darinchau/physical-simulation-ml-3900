@@ -164,5 +164,5 @@ if __name__ == "__main__":
     # ], sequential=True, to_test=GOAL_TEST, use_e_density=True)
 
     test_all_models([
-        TCEPRegression()
-    ], sequential=True, to_test=(5, 8, 10), use_e_density=False)
+        TCEPRegression(20)
+    ], sequential=True, to_test=GOAL_TEST, use_e_density=False)

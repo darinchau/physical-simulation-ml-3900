@@ -214,7 +214,7 @@ def make_static_plot(frame_errors, val_f, plot_name, path):
             # The indexing is on keys which is of the format "frame 123"
             # So all it does is to crop away the prepend
             if int(key[6:]) in (1, 5, 10, 20, 40, 60, 90):
-                ax.plot([val_f(entry) for entry in list_values], label=f"First {key[6:]}")
+                ax.plot([1e-24 if val_f(entry) == 0 else val_f(entry) for entry in list_values], label=f"First {key[6:]}")
             else:
                 continue
 
@@ -227,11 +227,14 @@ def make_static_plot(frame_errors, val_f, plot_name, path):
         # Show the thing
         fig.savefig(f"{path}/{plot_name} across frame.png")
 
-        # Set y-axis to log scale
-        ax.set_yscale('log')
+        try:
+            # Set y-axis to log scale
+            ax.set_yscale('log')
 
-        # Save the figure again in log scale
-        fig.savefig(f"{path}/{plot_name} across frame log.png")
+            # Save the figure again in log scale
+            fig.savefig(f"{path}/{plot_name} across frame log.png")
+        except ValueError:
+            pass
 
 # Takes a path, reads the predictions inside and generate all sorts of animations/plots
 # If you want to add extra plots, this is the function you have to worry about
