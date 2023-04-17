@@ -1,8 +1,10 @@
 from __future__ import annotations
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
-from sklearn.linear_model import LinearRegression as Linear, RidgeCV, MultiTaskElasticNetCV, MultiTaskLassoCV, ElasticNetCV, LassoCV, BayesianRidge, OrthogonalMatchingPursuitCV, SGDRegressor as SGD, PassiveAggressiveRegressor as PassiveAggressive
+from sklearn.linear_model import LinearRegression as Linear, RidgeCV, MultiTaskElasticNetCV, MultiTaskLassoCV, BayesianRidge, OrthogonalMatchingPursuitCV, SGDRegressor as SGD, PassiveAggressiveRegressor as PassiveAggressive
 from sklearn.tree import DecisionTreeRegressor as DecisionTree
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.pipeline import Pipeline
 import numpy as np
 from abc import abstractmethod as virtual
 from load import index_exclude, index_include
@@ -267,8 +269,14 @@ class MultipleRegressor(Regressor):
 
         models = [None] * num_tasks
 
-        for i in range(num_tasks):
-            models[i] = self.fit(xtrain, ytrain[:, i])
+        try:
+            for i in range(num_tasks):
+                models[i] = self.fit(xtrain, ytrain[:, i])
+        except ValueError as e:
+            if too_many_split(e):
+                raise RegressorFitError()
+            else:
+                raise e
 
         self._model = models
 
@@ -855,6 +863,30 @@ class TCEPRegression(Regressor):
     def model_name(self):
         return "TCEP Model"
 
+# N degree regression
+class PolynomialRegression(Regressor):
+    def __init__(self, degree=2, interaction_only=False):
+        self.degree = degree
+        self.interaction_only = interaction_only
+
+    def fit(self, xtrain, ytrain):
+        poly = PolynomialFeatures(degree=self.degree, include_bias=False, interaction_only=self.interaction_only)
+        lin = Linear()
+
+        xfeatures = poly.fit_transform(xtrain)
+        print(xfeatures.shape)
+        lin.fit(xfeatures, ytrain)
+        return lin
+
+    def predict(self, xtest):
+        poly = PolynomialFeatures(degree=self.degree, include_bias=False, interaction_only=self.interaction_only)
+        xfeatures = poly.fit_transform(xtest)
+        return self.model.predict(xfeatures)
+
+    @property
+    def model_name(self):
+        return f"Degree{self.degree} Regression"
+
 # Import antics
 __all__ = [
     "Regressor",
@@ -873,5 +905,6 @@ __all__ = [
     "GLH2Regression",
     "GLH3Regression",
     "GLH4Regression",
-    "TCEPRegression"
+    "TCEPRegression",
+    "PolynomialRegression"
 ]

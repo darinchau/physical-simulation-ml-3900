@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colorbar import Colorbar
@@ -69,7 +70,7 @@ def peek_h5(path: str):
                 # Print the shape and first element of the dataset
                 print('\t\t', dataset.shape)
 
-# Wrapper class to help us plot data
+# Wrapper function to help us plot data
 def make_anim(predicted_data, original_data, path = None, prediction_name = None):
     spacing_x = np.load("mesh_data_x.npy")
     spacing_y = np.load("mesh_data_y.npy")
@@ -214,7 +215,7 @@ def make_static_plot(frame_errors, val_f, plot_name, path):
             # The indexing is on keys which is of the format "frame 123"
             # So all it does is to crop away the prepend
             if int(key[6:]) in (1, 5, 10, 20, 40, 60, 90):
-                ax.plot([1e-24 if val_f(entry) == 0 else val_f(entry) for entry in list_values], label=f"First {key[6:]}")
+                ax.plot([val_f(entry) for entry in list_values], label=f"First {key[6:]}")
             else:
                 continue
 
@@ -242,6 +243,11 @@ def make_plots(path, model_name = None):
     # Retreive the model name from the path if the user did not provide explicitly
     if model_name is None:
         model_name = path.split("/")[-1]
+
+    # # If the h5 file does not exist, this probably means the model raises RegressorFitError at every iteration
+    # # This means the model is totally impractical or some shit
+    # if not os.path.isfile(path):
+    #     return
 
     with h5py.File(f"{path}/predictions.h5", 'r') as f:
         # Keep note of the frame errors

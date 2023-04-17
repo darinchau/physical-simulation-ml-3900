@@ -152,7 +152,6 @@ if __name__ == "__main__":
     #     RidgeCVRegression(),
     #     GaussianRegression(),
     #     LinearRegression(),
-    #     SGDRegression(),
     #     MultiTaskLassoCVRegression(),
     #     MultiTaskElasticNetCVRegression(),
     #     BayesianRidgeRegression(),
@@ -163,6 +162,22 @@ if __name__ == "__main__":
     #     # SimpleNetRegression()
     # ], sequential=True, to_test=GOAL_TEST, use_e_density=True)
 
-    test_all_models([
-        TCEPRegression(20)
-    ], sequential=True, to_test=GOAL_TEST, use_e_density=False)
+    # test_all_models([
+    #     TCEPRegression(20)
+    # ], sequential=True, to_test=GOAL_TEST, use_e_density=False)
+
+    # test_all_models([
+    #     PolynomialRegression(1),
+    #     PolynomialRegression(2),
+    #     PolynomialRegression(3),
+    #     PolynomialRegression(4),
+    #     PolynomialRegression(5),
+    #     PolynomialRegression(6),
+    #     PolynomialRegression(7),
+    #     PolynomialRegression(8),
+    # ], sequential=False, to_test=GOAL_TEST, use_e_density=False)
+
+    # test_all_models([
+    #     PolynomialRegression(3),
+    # ], sequential=True, to_test=GOAL_TEST, use_e_density=True)
+    pass
