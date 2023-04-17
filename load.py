@@ -70,135 +70,144 @@ def peek_h5(path: str):
                 # Print the shape and first element of the dataset
                 print('\t\t', dataset.shape)
 
+# A class wrapper to help us plot data. We assume all error checking has been done
+class AnimationMaker:
+    def __init__(self) -> None:
+        # Initialize the maker. We will use height ratios to sort of keep track of the types of the data
+        self.datas = []
+        self.height_ratios = []
+        self.nframes = None
+
+    def add_data(self, data, title, vmin = None, vmax = None):
+        if self.nframes is None:
+            self.nframes = len(data)
+        else:
+            assert len(data) == self.nframes
+
+        if vmin is None:
+            vmin = np.min(data)
+        if vmax is None:
+            vmax = np.max(data)
+        self.datas.append((np.array(data), title, vmin, vmax))
+        self.height_ratios.append(5)
+        return self
+
+
+    def add_text(self, text):
+        if self.nframes is None:
+            self.nframes = len(text)
+        else:
+            assert len(text) == self.nframes
+
+        self.datas.append(text)
+        self.height_ratios.append(1)
+        return self
+
+    def save(self, path, title = ""):
+        if self.nframes is None:
+            raise ValueError("No data to plot")
+
+        # Create a mesh_grid
+        x, y = np.meshgrid(SPACING_X, SPACING_Y)
+
+        # Create a list of artists to update
+        artists = []
+
+        # Number of datas to plot
+        num_data = len(self.datas)
+
+        # Set up figure and axis for animation
+        fig, axes = plt.subplots(num_data, 1, gridspec_kw={'height_ratios': self.height_ratios})
+
+        # Figure title
+        fig.suptitle(title)
+
+        # One axis one data
+        for i in range(num_data):
+            # Plot an animation
+            if self.height_ratios[i] == 5:
+                data, title, vmin, vmax = self.datas[i]
+
+                axes[i].set_aspect("equal", adjustable="box")
+                axes[i].set_ylabel("Y", va="bottom")
+                axes[i].set_title(f"Original data")
+                axes[i].set_yticks([])
+                heatmap = axes[i].pcolormesh(x, y, np.transpose(data[0]), cmap="hot", vmin=vmin, vmax=vmax)
+
+                # colorbar
+                cbar = fig.colorbar(heatmap, ax=axes[i])
+                cbar.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
+                tk = np.round(np.linspace(vmin, vmax, 4, endpoint=True), 2)
+                cbar.set_ticks(tk)
+
+                # Save the heatmap somewhere
+                artists.append(heatmap)
+
+            # Text data
+            else:
+                data = self.datas[i]
+                text = axes[i].text(0, 0.5, data[0], ha="left", va="center", fontsize=9)
+                axes[i].set_axis_off()
+
+                # Save the text somewhere
+                artists.append(text)
+
+        # Update the color maps
+        def update(frame):
+            for i in range(num_data):
+                if self.height_ratios[i] == 5:
+                    heatmap = artists[i]
+                    fr = self.datas[i][0][frame]
+                    heatmap.set_array(np.transpose(fr))
+                else:
+                    text = artists[i]
+                    text.set_text(self.datas[i][frame])
+            return artists
+
+        # Create animation object and display it
+        anim = animation.FuncAnimation(fig, update, frames=self.nframes, interval=50, blit=True)
+
+        plt.tight_layout()
+
+        if path is not None:
+            writergif = animation.PillowWriter(fps=20)
+            anim.save(path, writer=writergif)
+            # optimize_gif(path)
+        else:
+            plt.show()
+
+        plt.close("all")
+
 # Wrapper function to help us plot data
-def make_anim(predicted_data, original_data, path = None, prediction_name = None):
-    spacing_x = np.load("mesh_data_x.npy")
-    spacing_y = np.load("mesh_data_y.npy")
+def make_anim(predicted_data, original_data, path = None, title = None):
+    anim = AnimationMaker()
 
-    x, y = np.meshgrid(spacing_x, spacing_y)
+    data_vmin, data_vmax = np.min(original_data), np.max(original_data)
+    anim.add_data(original_data, "Original data")
 
-    # Set up figure and axis for animation
-    fig, axes = plt.subplots(6, 1, gridspec_kw={'height_ratios': [5, 5, 5, 5, 1, 1]})
+    anim.add_data(predicted_data, "Predicted data", data_vmin, data_vmax)
 
-    # Figure title
-    fig.suptitle(prediction_name)
-
-    # Use the same color bar for data for predicted results as well
-    orig_vim = np.min(original_data)
-    orig_vmax = np.max(original_data)
-
-    # =========================================================================
-    # Ax 0 corresponds to the prediction and the data
-    axn = 0
-    # =========================================================================
-    axes[axn].set_aspect("equal", adjustable="box")
-    axes[axn].set_ylabel("Y", va="bottom")
-    axes[axn].set_title(f"Original data")
-    axes[axn].set_yticks([])
-    data_heatmap = axes[axn].pcolormesh(x, y, np.transpose(original_data[0]), cmap="hot", vmin=orig_vim, vmax=orig_vmax)
-
-    # colorbar
-    cbar0 = fig.colorbar(data_heatmap, ax=axes[axn])
-    cbar0.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
-    tk0 = np.round(np.linspace(orig_vim, orig_vmax, 4, endpoint=True), 2)
-    cbar0.set_ticks(tk0)
-
-    # =========================================================================
-    # Ax 1 for prediction
-    axn = 1
-    # =========================================================================
-    axes[axn].set_aspect("equal", adjustable="box")
-    axes[axn].set_ylabel("Y", va="bottom")
-    axes[axn].set_title(f"Predicted data")
-    axes[axn].set_yticks([])
-    pred_heatmap = axes[axn].pcolormesh(x, y, np.transpose(predicted_data[0]), cmap="hot", vmin=orig_vim, vmax=orig_vmax)
-
-    # colorbar
-    cbar1 = fig.colorbar(pred_heatmap, ax=axes[axn])
-    cbar1.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
-    cbar1.set_ticks(tk0)
-
-    # # =========================================================================
-    # # Ax 2 corresponds to the errors
-    axn = 2
-    # # =========================================================================
     error = np.abs(predicted_data - original_data)
-    axes[axn].set_aspect("equal", adjustable="box")
-    axes[axn].set_ylabel("Y", va="bottom")
-    axes[axn].set_title(f"Error plot")
-    axes[axn].set_yticks([])
-    err_heatmap = axes[axn].pcolormesh(x, y, np.transpose(error[0]), cmap="hot", vmin=0, vmax=np.max(error))
+    anim.add_data(error, "Error", 0)
 
-    # error colorbar. Set number of rounding decimals to one less than the order of magnitude
-    cbar2 = fig.colorbar(err_heatmap, ax=axes[axn])
-    cbar2.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
-    num_decimals = -ceil(np.log10(np.max(error))) + 1
-    tk2 = np.round(np.linspace(0, np.max(error), 4, endpoint=True), num_decimals)
-    cbar2.set_ticks(tk2)
-
-    # =========================================================================
-    # Ax 3 corresponds to the log plot of errors
-    axn = 3
-    # =========================================================================
     err_log_10 = np.log10(error)
     err_log_10[error < 1e-20] = np.min(err_log_10[error > 0]) - 1
+    anim.add_data(err_log_10, "Error log plot")
 
-    axes[axn].set_aspect("equal", adjustable="box")
-    axes[axn].set_xlabel("X")
-    axes[axn].set_ylabel("Y", va="bottom")
-    axes[axn].set_title(f"Error log plot")
-    axes[axn].set_yticks([])
-    log_err_heatmap = axes[3].pcolormesh(x, y, np.transpose(err_log_10[0]), cmap="hot", vmin = np.min(err_log_10), vmax = np.max(err_log_10))
-
-    # error colorbar. Set number of rounding decimals to one less than the order of magnitude
-    cbar3 = fig.colorbar(log_err_heatmap, ax=axes[axn])
-    cbar3.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
-
-    # =========================================================================
-    # Calculate errors
-    # =========================================================================
+    # Errors
     rmse = np.sqrt(np.mean((predicted_data - original_data) ** 2))
     worst = np.max(np.abs(predicted_data - original_data))
     rmse_last_10_frames = np.sqrt(np.mean((predicted_data[-10:] - original_data[-10:]) ** 2))
     worst_last_10_frames = np.max(np.abs(predicted_data[-10:] - original_data[-10:]))
 
-    # =========================================================================
-    # Ax 4 is used purely to display error bounds information
-    axn = 4
-    # =========================================================================
-    axes[axn].text(0, 0.5, f"RMSE: {round(rmse, 5)}, (last 10 frames): {round(rmse_last_10_frames, 5)}, worst = {round(worst, 5)} (last 10 frames) = {round(worst_last_10_frames, 5)}", ha="left", va="center", fontsize=9)
-    axes[axn].set_axis_off()
+    error_text = f"RMSE: {round(rmse, 5)}, (last 10 frames): {round(rmse_last_10_frames, 5)}, worst = {round(worst, 5)} (last 10 frames) = {round(worst_last_10_frames, 5)}"
+    anim.add_text([error_text for _ in range(101)])
 
-    # =========================================================================
-    # Ax 5 is frame number
-    axn = 5
-    # =========================================================================
-    frame_nr = axes[axn].text(0, 0.5, f"Frame 0 - 0V", ha="left", va="center", fontsize=9)
-    axes[axn].set_axis_off()
+    # Frame number
+    frames = [f"Frame {frame} - {round(frame*0.0075, 4)}V" for frame in range(101)]
+    anim.add_text(frames)
 
-    # Define update function for animation
-    def update(frame):
-        data_heatmap.set_array(np.transpose(original_data[frame]))
-        pred_heatmap.set_array(np.transpose(predicted_data[frame]))
-        err_heatmap.set_array(np.transpose(error[frame]))
-        log_err_heatmap.set_array(np.transpose(err_log_10[frame]))
-        # The rounding is needed otherwise floating point antics makes everything look horrible
-        frame_nr.set_text(f"Frame {frame} - {round(frame*0.0075, 4)}V")
-        return data_heatmap, pred_heatmap, err_heatmap, log_err_heatmap, frame_nr
-
-    # Create animation object and display it
-    anim = animation.FuncAnimation(fig, update, frames=predicted_data.shape[0], interval=50, blit=True)
-
-    plt.tight_layout()
-
-    if path is not None:
-        writergif = animation.PillowWriter(fps=20)
-        anim.save(path, writer=writergif)
-        # optimize_gif(path)
-    else:
-        plt.show()
-
-    plt.close("all")
+    anim.save(path, title)
 
 # Helper function to extract the middle region and outer region
 def split_mid_outer(data):
@@ -244,11 +253,6 @@ def make_plots(path, model_name = None):
     if model_name is None:
         model_name = path.split("/")[-1]
 
-    # # If the h5 file does not exist, this probably means the model raises RegressorFitError at every iteration
-    # # This means the model is totally impractical or some shit
-    # if not os.path.isfile(path):
-    #     return
-
     with h5py.File(f"{path}/predictions.h5", 'r') as f:
         # Keep note of the frame errors
         frame_errors = {k: [] for k in f.keys()}
@@ -258,7 +262,7 @@ def make_plots(path, model_name = None):
         data_mid, data_outer = split_mid_outer(original_data)
 
         for key in f.keys():
-            # Prediction, the index is to change it to numpy array
+            # Prediction, the "take everythign" slice index is to change it to numpy array
             pred = f[key]['data'][:]
 
             # First plot is the animation

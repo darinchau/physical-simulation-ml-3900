@@ -180,4 +180,9 @@ if __name__ == "__main__":
     # test_all_models([
     #     PolynomialRegression(3),
     # ], sequential=True, to_test=GOAL_TEST, use_e_density=True)
-    pass
+
+    # test_all_models([
+    #     LinearRegression()
+    # ], sequential=True, to_test=(10,), use_e_density=False)
+
+    anim = AnimationMaker()
