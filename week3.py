@@ -179,7 +179,9 @@ def task2():
 def task3():
     test_all_models([
         TCEPRegression(5),
-        TCEPRegression(20)
+        TCEPRegression(20),
+        TCEPRegression(5, num_epochs=50000),
+        TCEPRegression(20, num_epochs=50000),
     ], sequential=True, to_test=GOAL_TEST, use_e_density=NO_E_DENSITY)
 
 def task4():
@@ -212,6 +214,13 @@ def task7():
         SGDRegression(),
     ], sequential=True, to_test=GOAL_TEST, use_e_density=USE_NORMALIZED_E_DENSITY)
 
+def task8():
+    test_all_models([
+        RidgeCVRegression(),
+        GaussianRegression(),
+        LinearRegression(),
+    ], sequential=False, to_test=GOAL_TEST, use_e_density=NO_E_DENSITY)
+
 if __name__ == "__main__":
     task1()
     task2()
@@ -220,6 +229,7 @@ if __name__ == "__main__":
     task5()
     task6()
     task7()
+    task8()
 
     # anim = AnimationMaker()
     # anim.add_data(load_elec_potential(), "Electric potential")

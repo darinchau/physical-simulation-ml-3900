@@ -92,6 +92,7 @@ class Regressor:
             if k[0] == "_":
                 continue
             st += f"\n{k} = {str(v)}"
+        st += "\nsss"
         structures = "\n\n".join([str(x) for x in self.model_structure])
         st += structures
         return st
@@ -769,8 +770,9 @@ class TCEPNet(NeuralNetwork):
 
 # Time Convolution Error Prediction
 class TCEPRegression(Regressor):
-    def __init__(self, use_first_n_for_linear = 5):
+    def __init__(self, use_first_n_for_linear = 5, num_epochs = 500):
         self.linear_component_N = use_first_n_for_linear
+        self.num_epochs = num_epochs
 
     # We do the training directly in fit_model so leave this unimplemented
     def fit(self, xtrain, ytrain):
@@ -826,10 +828,12 @@ class TCEPRegression(Regressor):
 
         # Train CNN here
         tcep = TCEPNet()
-        tcep.init_net(1 + N*2193)
+        input_size = 1 + N*2193
+        tcep.init_net(input_size)
+        self.model_structure.append(f"{summary(tcep, (1, input_size), verbose=0)}")
         tcep.register_test_data(error_xtest, error_ytest)
         tcep.fit(error_xtrain, error_ytrain,
-                epochs = 500,
+                epochs = self.num_epochs,
                 validate_every = 10,
                 model_name=self.model_name,
                 input_name=f'{xtrain.shape[0]} datas',
