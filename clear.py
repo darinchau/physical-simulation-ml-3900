@@ -2,8 +2,10 @@
 
 import os
 
+PATH = "./Datas/Week 4"
+
 if __name__ == "__main__":
-    for foldername, subfolders, filenames in os.walk("./Datas/Week 3"):
+    for foldername, subfolders, filenames in os.walk(PATH):
         for filename in filenames:
             if filename.endswith('.png') or filename.endswith('.gif'):
                 os.remove(os.path.join(foldername, filename))

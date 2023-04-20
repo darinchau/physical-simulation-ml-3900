@@ -91,9 +91,8 @@ def train_model(regressor: Regressor,
         # Save all the predictions
         predictions[idx.name] = pred
 
-        # Print some indication on finishing first n
-        log = f"Done {model_name} using {idx.name}"
-        print(log)
+        # Print some indication on finishing training
+        print(f"Done {model_name} using {idx.name[1:]}" if idx.name[0] == "_" else f"Done {model_name} using {idx.name}")
 
         # Save the history at each step
         save_h5(predictions, f"{path}/predictions.h5")
@@ -145,12 +144,20 @@ def test_all_models(models: list[Regressor], sequential: bool, to_test: Iterable
 
     print(f"Total time taken: {round(time.time() - t, 3)}")
 
+
 if __name__ == "__main__":
     test_all_models([
-        LinearRegression()
+        LinearRegression(),
+        RidgeCVRegression(),
+        GaussianRegression(),
+        PolynomialRegression(2),
+        
     ], to_test = [
-        TrainingIndex("15 to 45", range(15, 56)),
-        TrainingIndex("20 to 40", range(20, 41)),
-        TrainingIndex("25 to 35", range(25, 36)),
+        TrainingIndex("First 20", range(20)),
+        TrainingIndex("First 30", range(30)),
+        TrainingIndex("_15 to 45", range(15, 45)),
+        TrainingIndex("20 to 40", range(20, 40)),
+        TrainingIndex("_25 to 35", range(25, 35)),
         TrainingIndex("29 and 30 and 31", [29, 30, 31]),
     ], sequential = False)
+  

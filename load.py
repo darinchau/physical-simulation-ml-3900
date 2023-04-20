@@ -53,7 +53,12 @@ def save_h5(d: dict[str, NDArray], path: str):
 
         # Loop through dictionary keys and add them as groups to the file
         for key in d.keys():
-            group = f.create_group(key)
+            if key[0] == "_":
+                group = f.create_group(key[1:])
+                group.attrs["appear in plot"] = 'false'
+            else:
+                group = f.create_group(key)
+                group.attrs["appear in plot"] = 'true'
 
             # Add the numpy array value to the group and enable compression
             dataset = group.create_dataset('data', data=d[key])
@@ -220,33 +225,36 @@ def split_mid_outer(data):
     middle = data[:, 40:-40, :]
     outer = np.concatenate([data[:, :40, :], data[:, -40:, :]], axis=1)
     return middle, outer
+        
+# Wrapper for static plots maker
+class StaticPlotMaker:
+    def __init__(self):
+        self.infos: dict[str, list] = {}
+        
+    def set(self, key: str, info):
+        self.infos[key] = list(info)
+    
+    def append(self, key: str, value):
+        if key not in self.infos:
+            self.infos[key] = []
+        self.infos[key].append(value)
+    
+    def plot(self, plot_name, path, title = None):
+        # Make the title
+        if title is None:
+            title = f"{plot_name} for each frame"
 
-# Helper function that creates the line graphs across frames for different n
-def make_static_plot(frame_errors, val_f, plot_name, path):
-        # Plot error each frame
         fig, ax = plt.subplots()
 
-        # Loop through all the frame errors
-        for key, list_values in frame_errors.items():
-            if key[0] == "_":
-                continue
-            
-            ax.plot([val_f(entry) for entry in list_values], label=key)
+        for key, list_values in self.infos.items():
+            ax.plot(list_values, label=key)
 
-        # add legend to the plot
         ax.legend()
-
-        # Title
-        fig.suptitle(f"{plot_name} for each frame")
-
-        # Show the thing
+        fig.suptitle(title)
         fig.savefig(f"{path}/{plot_name}.png")
 
         try:
-            # Set y-axis to log scale
             ax.set_yscale('log')
-
-            # Save the figure again in log scale
             fig.savefig(f"{path}/{plot_name} log.png")
         except ValueError:
             pass
@@ -257,40 +265,61 @@ def make_plots(path, model_name = None):
     # Retreive the model name from the path if the user did not provide explicitly
     if model_name is None:
         model_name = path.split("/")[-1]
+    
+    # Keep note of the frame errors
+    frame_rmse = StaticPlotMaker()
+    frame_rmse_outer = StaticPlotMaker()
+    frame_rmse_mid = StaticPlotMaker()
+    frame_worst = StaticPlotMaker()
+    frame_mid_potential = StaticPlotMaker()
+    
+    # Loop through keys of the file and print them
+    original_data = load_elec_potential()
+    data_mid, data_outer = split_mid_outer(original_data)
+    
+    # Plot the middle potential for the original data
+    frame_mid_potential.set("Original", np.average(data_mid.reshape((101, -1)), axis = 1))
 
     with h5py.File(f"{path}/predictions.h5", 'r') as f:
-        # Keep note of the frame errors
-        frame_errors = {k: [] for k in f.keys()}
-
-        # Loop through keys of the file and print them
-        original_data = load_elec_potential()
-        data_mid, data_outer = split_mid_outer(original_data)
-
         for key in f.keys():
             # Prediction, the "take everythign" slice index is to change it to numpy array
             pred = f[key]['data'][:]
-
-            # First plot is the animation
+            
             # Animation :D
             make_anim(pred, original_data, f"{path}/{key}.gif", f"Results from {model_name} {key}")
+            
+            # If we indicate to not appear in plot, then skip everything else here
+            if "appear in plot" in f[key].attrs and f[key].attrs["appear in plot"] == 'false':
+                continue
 
+            # Split the middle region and outer region
             pred_mid, pred_outer = split_mid_outer(pred)
 
             # Second plot is error each frame for different ns
-            # Uses a for loop to save memory. I know einsum is a thing but I dont know how to use it
+            # Uses a for loop to save memory
             for i in range(101):
                 # General RMSE
                 rmse = np.sqrt(np.mean((pred[i] - original_data[i]) ** 2))
+                frame_rmse.append(key, rmse)
+                
+                # Worst error
                 worst = np.max(np.abs(pred[i] - original_data[i]))
+                frame_worst.append(key, worst)
 
                 # Region-specific RMSE
                 middle_rmse = np.sqrt(np.mean((pred_mid[i] - data_mid[i]) ** 2))
+                frame_rmse_mid.append(key, middle_rmse)
+                
+                # Region-specific RMSE. THe outer one is usually not interesting
                 outer_rmse = np.sqrt(np.mean((pred_outer[i] - data_outer[i]) ** 2))
-
-                # Append all errors
-                frame_errors[key].append((rmse, worst, middle_rmse, outer_rmse))
-
-        make_static_plot(frame_errors, lambda x: x[0], f"{model_name} RMSE Error", path)
-        make_static_plot(frame_errors, lambda x: x[1], f"{model_name} Worst Error", path)
-        make_static_plot(frame_errors, lambda x: x[2], f"{model_name} Middle RMSE", path)
-        make_static_plot(frame_errors, lambda x: x[3], f"{model_name} Outer RMSE", path)
+                frame_rmse_outer.append(key, outer_rmse)
+                
+                # The middle growth thing
+                mid_potential = np.average(pred_mid[i])
+                frame_mid_potential.append(key, mid_potential)
+        
+        frame_rmse.plot(f"{model_name} RMSE Error", path)
+        frame_worst.plot(f"{model_name} Worst Error", path)
+        frame_rmse_mid.plot(f"{model_name} Middle RMSE", path)
+        frame_rmse_outer.plot(f"{model_name} Outer RMSE", path)
+        frame_mid_potential.plot(f"{model_name} mid potential", path, title = f"Electric potential of gate region from {model_name}")
