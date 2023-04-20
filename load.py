@@ -226,13 +226,12 @@ def make_static_plot(frame_errors, val_f, plot_name, path):
         # Plot error each frame
         fig, ax = plt.subplots()
 
+        # Loop through all the frame errors
         for key, list_values in frame_errors.items():
-            # The indexing is on keys which is of the format "frame 123"
-            # So all it does is to crop away the prepend
-            if int(key[6:]) in (1, 5, 10, 20, 40, 60, 90):
-                ax.plot([val_f(entry) for entry in list_values], label=f"First {key[6:]}")
-            else:
+            if key[0] == "_":
                 continue
+            
+            ax.plot([val_f(entry) for entry in list_values], label=key)
 
         # add legend to the plot
         ax.legend()
@@ -241,14 +240,14 @@ def make_static_plot(frame_errors, val_f, plot_name, path):
         fig.suptitle(f"{plot_name} for each frame")
 
         # Show the thing
-        fig.savefig(f"{path}/{plot_name} across frame.png")
+        fig.savefig(f"{path}/{plot_name}.png")
 
         try:
             # Set y-axis to log scale
             ax.set_yscale('log')
 
             # Save the figure again in log scale
-            fig.savefig(f"{path}/{plot_name} across frame log.png")
+            fig.savefig(f"{path}/{plot_name} log.png")
         except ValueError:
             pass
 
@@ -273,7 +272,7 @@ def make_plots(path, model_name = None):
 
             # First plot is the animation
             # Animation :D
-            make_anim(pred, original_data, f"{path}/first {key[6:]}.gif", f"Results from {model_name} first {key[6:]}")
+            make_anim(pred, original_data, f"{path}/{key}.gif", f"Results from {model_name} {key}")
 
             pred_mid, pred_outer = split_mid_outer(pred)
 
@@ -291,7 +290,7 @@ def make_plots(path, model_name = None):
                 # Append all errors
                 frame_errors[key].append((rmse, worst, middle_rmse, outer_rmse))
 
-            make_static_plot(frame_errors, lambda x: x[0], f"{model_name} RMSE Error", path)
-            make_static_plot(frame_errors, lambda x: x[1], f"{model_name} Worst Error", path)
-            make_static_plot(frame_errors, lambda x: x[2], f"{model_name} Middle RMSE", path)
-            make_static_plot(frame_errors, lambda x: x[3], f"{model_name} Outer RMSE", path)
+        make_static_plot(frame_errors, lambda x: x[0], f"{model_name} RMSE Error", path)
+        make_static_plot(frame_errors, lambda x: x[1], f"{model_name} Worst Error", path)
+        make_static_plot(frame_errors, lambda x: x[2], f"{model_name} Middle RMSE", path)
+        make_static_plot(frame_errors, lambda x: x[3], f"{model_name} Outer RMSE", path)

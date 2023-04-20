@@ -52,10 +52,6 @@ class Regressor:
     def set_path(self, path):
         self._path = path
 
-    # Sets the name of the input so that stuff is saved with names nicely
-    def set_input_name(self, name):
-        self._input_name = name
-
     @property
     def can_use_electron_density(self):
         return True
@@ -92,7 +88,7 @@ class Regressor:
             if k[0] == "_":
                 continue
             st += f"\n{k} = {str(v)}"
-        st += "\nsss"
+        st += "\n"
         structures = "\n\n".join([str(x) for x in self.model_structure])
         st += structures
         return st
@@ -941,6 +937,10 @@ class PolynomialRegression(Regressor):
     @property
     def model_name(self):
         return f"Degree{self.degree} Regression"
+    
+    @property
+    def can_use_electron_density(self):
+        return self.degree <= 2
 
 # Import antics
 __all__ = [
