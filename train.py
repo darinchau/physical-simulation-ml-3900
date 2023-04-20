@@ -767,12 +767,63 @@ class TCEPNet(NeuralNetwork):
 
         return x
 
+# Second iteration of TCEP using Sigmoid activation
+class TCEP2Net(NeuralNetwork):
+    def init_net(self, input_size):
+        self.voltage = nn.Linear(1, 1)
+        N = self.N = int((input_size - 1)/2193)
+
+        self.conv1 = nn.Conv2d(in_channels=N, out_channels=2*N, kernel_size=3, padding=0)
+        self.conv2 = nn.Conv2d(in_channels=2*N, out_channels=4*N, kernel_size=3, padding=0)
+        self.pool = nn.MaxPool2d(kernel_size=2)
+        self.conv3 = nn.Conv2d(in_channels=4*N, out_channels=6*N, kernel_size=3, padding=0)
+        self.conv4 = nn.Conv2d(in_channels=6*N, out_channels=8*N, kernel_size=3, padding=0)
+        self.flatten = nn.Flatten()
+
+        # 116 is 58 * 2 - check calculations below
+        final_num_features = 8*N*116 + 1
+
+        # The final NN part
+        self.nn1 = nn.Linear(final_num_features, 3000)
+        self.dropout = nn.Dropout(p=0.3)
+        self.nn2 = nn.Linear(3000, 2193)
+
+    def forward(self, x):
+        # Split into voltage part and error part
+        x_voltage = x[:, :1]
+        x_error = x[:, 1:].reshape((-1, self.N, 129, 17))
+
+        # Voltage part
+        x_voltage = self.voltage(x_voltage)
+
+        # Error part
+        # Shapes calcualted assuming batch size = 1
+        x_error = self.conv1(x_error) # (1, 10, 127, 15)
+        x_error = nn.functional.sigmoid(x_error)
+        x_error = self.conv2(x_error) # (1, 20, 125, 13)
+        x_error = nn.functional.sigmoid(x_error)
+        x_error = self.pool(x_error) # (1, 20, 62, 6)
+        x_error = self.conv3(x_error) # (1, 30, 60, 4)
+        x_error = nn.functional.sigmoid(x_error)
+        x_error = self.conv4(x_error) # (1, 40, 58, 2)
+        x_error = nn.functional.sigmoid(x_error)
+        x_error = self.flatten(x_error) # (1, 4640)
+
+        # Combine both parts
+        # Combine the two tensors
+        x = torch.cat((x_voltage, x_error), dim=1)
+        x = self.nn1(x)
+        x = self.dropout(x)
+        x = self.nn2(x)
+
+        return x
 
 # Time Convolution Error Prediction
 class TCEPRegression(Regressor):
-    def __init__(self, use_first_n_for_linear = 5, num_epochs = 500):
+    def __init__(self, use_first_n_for_linear = 5, num_epochs = 500, tcep = TCEPNet):
         self.linear_component_N = use_first_n_for_linear
         self.num_epochs = num_epochs
+        self.tcep = tcep
 
     # We do the training directly in fit_model so leave this unimplemented
     def fit(self, xtrain, ytrain):
@@ -827,7 +878,7 @@ class TCEPRegression(Regressor):
         error_ytest = error_y[new_num_training_data:]
 
         # Train CNN here
-        tcep = TCEPNet()
+        tcep = self.tcep()
         input_size = 1 + N*2193
         tcep.init_net(input_size)
         self.model_structure.append(f"{summary(tcep, (1, input_size), verbose=0)}")
@@ -910,5 +961,7 @@ __all__ = [
     "GLH3Regression",
     "GLH4Regression",
     "TCEPRegression",
+    "TCEPNet",
+    "TCEP2Net",
     "PolynomialRegression"
 ]

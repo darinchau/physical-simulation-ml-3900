@@ -33,6 +33,12 @@ def load_elec_potential():
 def load_e_density():
     return np.nan_to_num(ELECTRON_DENSITY, nan=0)
 
+def load_log_e_density():
+    log_e_density = load_e_density()
+    log_e_density[log_e_density < 1] = 1
+    log_e_density = np.log10(log_e_density)
+    return log_e_density
+
 def split_data(ins, train_idx):
     return index_include(ins, train_idx), index_exclude(ins, train_idx)
 
@@ -170,7 +176,7 @@ class AnimationMaker:
         plt.tight_layout()
 
         if path is not None:
-            writergif = animation.PillowWriter(fps=20)
+            writergif = animation.PillowWriter(fps=15)
             anim.save(path, writer=writergif)
             # optimize_gif(path)
         else:
@@ -232,7 +238,7 @@ def make_static_plot(frame_errors, val_f, plot_name, path):
         ax.legend()
 
         # Title
-        fig.suptitle(f"{plot_name} using the first n data across frames")
+        fig.suptitle(f"{plot_name} for each frame")
 
         # Show the thing
         fig.savefig(f"{path}/{plot_name} across frame.png")
@@ -285,7 +291,7 @@ def make_plots(path, model_name = None):
                 # Append all errors
                 frame_errors[key].append((rmse, worst, middle_rmse, outer_rmse))
 
-            make_static_plot(frame_errors, lambda x: x[0], "RMSE Error", path)
-            make_static_plot(frame_errors, lambda x: x[1], "Worst Error", path)
-            make_static_plot(frame_errors, lambda x: x[2], "Middle RMSE", path)
-            make_static_plot(frame_errors, lambda x: x[3], "Outer RMSE", path)
+            make_static_plot(frame_errors, lambda x: x[0], f"{model_name} RMSE Error", path)
+            make_static_plot(frame_errors, lambda x: x[1], f"{model_name} Worst Error", path)
+            make_static_plot(frame_errors, lambda x: x[2], f"{model_name} Middle RMSE", path)
+            make_static_plot(frame_errors, lambda x: x[3], f"{model_name} Outer RMSE", path)

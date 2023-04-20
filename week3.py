@@ -221,17 +221,36 @@ def task8():
         LinearRegression(),
     ], sequential=False, to_test=GOAL_TEST, use_e_density=NO_E_DENSITY)
 
-if __name__ == "__main__":
-    task1()
-    task2()
-    task3()
-    task4()
-    task5()
-    task6()
-    task7()
-    task8()
+def task9():
+    test_all_models([
+        TCEPRegression(5, num_epochs=10000, tcep=TCEP2Net),
+    ], sequential=True, to_test=(5, 10, 20, 40, 60, 90), use_e_density=NO_E_DENSITY)
 
-    # anim = AnimationMaker()
-    # anim.add_data(load_elec_potential(), "Electric potential")
-    # anim.add_data(load_e_density(), "Electron density")
-    # anim.save(path="./data.gif", suptitle="Data plots")
+def make_animation():
+    anim = AnimationMaker()
+    anim.add_data(load_elec_potential(), "Electric potential")
+    anim.add_data(load_e_density(), "Electron density")
+
+    log_e_density = load_e_density()
+    log_e_density[log_e_density < 1] = 1
+    log_e_density = np.log10(log_e_density)
+
+    anim.add_data(log_e_density, "Electron density log", vmin = 0)
+
+    anim.add_text([f"Frame {i}, {round(0.0075*i, 4)}V" for i in range(101)])
+
+    anim.save(path="./data.gif", suptitle="Data plots")
+
+
+if __name__ == "__main__":
+    # task1()
+    # task2()
+    # task3()
+    # task4()
+    # task5()
+    # task6()
+    # task7()
+    # task8()
+    # task9()
+
+    make_animation()
