@@ -925,7 +925,6 @@ class PolynomialRegression(Regressor):
         lin = Linear()
 
         xfeatures = poly.fit_transform(xtrain)
-        print(xfeatures.shape)
         lin.fit(xfeatures, ytrain)
         return lin
 
@@ -941,6 +940,8 @@ class PolynomialRegression(Regressor):
     @property
     def can_use_electron_density(self):
         return self.degree <= 2
+
+# Idea 3: (from Professor Wong) the function behaves
 
 # Import antics
 __all__ = [

@@ -33,6 +33,9 @@ def load_elec_potential():
 def load_e_density():
     return np.nan_to_num(ELECTRON_DENSITY, nan=0)
 
+def load_spacing():
+    return np.array(SPACING_X), np.array(SPACING_Y)
+
 def load_log_e_density():
     log_e_density = load_e_density()
     log_e_density[log_e_density < 1] = 1
@@ -117,9 +120,10 @@ class AnimationMaker:
     def save(self, path, suptitle = ""):
         if self.nframes is None:
             raise ValueError("No data to plot")
-
+        
         # Create a mesh_grid
-        x, y = np.meshgrid(SPACING_X, SPACING_Y)
+        x, y = load_spacing()
+        x, y = np.meshgrid(x, y)
 
         # Create a list of artists to update
         artists = []

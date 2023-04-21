@@ -151,7 +151,6 @@ if __name__ == "__main__":
         RidgeCVRegression(),
         GaussianRegression(),
         PolynomialRegression(2),
-        
     ], to_test = [
         TrainingIndex("First 20", range(20)),
         TrainingIndex("First 30", range(30)),
