@@ -144,19 +144,32 @@ def test_all_models(models: list[Regressor], sequential: bool, to_test: Iterable
 
     print(f"Total time taken: {round(time.time() - t, 3)}")
 
-
-if __name__ == "__main__":
+def task1():
     test_all_models([
         LinearRegression(),
         RidgeCVRegression(),
         GaussianRegression(),
         PolynomialRegression(2),
     ], to_test = [
+        TrainingIndex("First 5", range(5)),
         TrainingIndex("First 20", range(20)),
         TrainingIndex("First 30", range(30)),
+        TrainingIndex("First 40", range(40)),
         TrainingIndex("_15 to 45", range(15, 45)),
         TrainingIndex("20 to 40", range(20, 40)),
         TrainingIndex("_25 to 35", range(25, 35)),
         TrainingIndex("29 and 30 and 31", [29, 30, 31]),
     ], sequential = False)
   
+
+if __name__ == "__main__":
+    model_name = "Linear regression density"
+    
+    d = DataVisualizer()
+    with h5py.File(f"{PATH_PREPEND}/{model_name}/predictions.h5", 'r') as f:
+        d.add_data(f["First 20"]["data"][:], "First 20")
+        d.add_data(f["First 30"]["data"][:], "First 30")
+        d.add_data(f["20 to 40"]["data"][:], "20 to 40")
+        d.add_data(f["29 and 30 and 31"]["data"][:], "29 and 30 and 31")
+
+    d.show()

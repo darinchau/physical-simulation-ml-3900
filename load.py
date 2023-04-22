@@ -327,3 +327,72 @@ def make_plots(path, model_name = None):
         frame_rmse_mid.plot(f"{model_name} Middle RMSE", path)
         frame_rmse_outer.plot(f"{model_name} Outer RMSE", path)
         frame_mid_potential.plot(f"{model_name} mid potential", path, title = f"Electric potential of gate region from {model_name}")
+
+class DataVisualizer:
+    def __init__(self) -> None:
+        self.datas = {}
+    
+    def add_data(self, data, name):
+        self.datas[name] = np.array(data)
+    
+    def show(self):
+        data = load_elec_potential()
+        
+        # Load the spacing
+        x_spacing, y_spacing = load_spacing()
+        x_grid, y_grid = np.meshgrid(x_spacing, y_spacing)
+
+        # Handle mouse click
+        def onclick(event, ax):
+            # Do a preliminary check for None values
+            if event.xdata is None:
+                return
+            
+            if event.ydata is None:
+                return
+            
+            if event.inaxes != ax:
+                return
+            
+            # Get the row and column indices of the clicked cell
+            x, y = event.xdata, event.ydata
+
+            # Find the index of the nearest spacing value
+            row = np.abs(y - y_spacing).argmin()
+            col = np.abs(x - x_spacing).argmin()
+            
+            # Plot the values
+            plt.figure()
+
+            # Get the values of the cell across all arrays
+            for k, v in self.datas.items():
+                values = v[:, col, row]
+                plt.plot(values, label = k)
+                
+            plt.xlabel("Array index")
+            plt.ylabel("Value")
+            plt.legend()
+            plt.title("Values for cell ({}, {})".format(row, col))
+            plt.show()
+
+        # Create the heatmap
+        fig, ax = plt.subplots()
+
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_ylabel("Y", va="bottom")
+        ax.set_yticks([])
+        heatmap = ax.pcolormesh(x_grid, y_grid, np.transpose(data[0]), cmap="hot", vmin = np.min(data), vmax = np.max(data))
+
+        cbar = fig.colorbar(heatmap, ax=ax)
+        cbar.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
+        tk = np.round(np.linspace(np.min(data), np.max(data), 4, endpoint=True), 2)
+        cbar.set_ticks(tk)
+
+        # Add a title
+        fig.suptitle("Visualize data")
+
+        # Add the click event handler
+        cid = fig.canvas.mpl_connect("button_press_event", lambda event: onclick(event, ax))
+
+        # Show the plot
+        plt.show()
