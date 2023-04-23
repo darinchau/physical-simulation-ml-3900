@@ -17,6 +17,9 @@ from numpy import log
 import matplotlib.pyplot as plt
 import re
 import math
+from scipy.optimize import minimize
+from numba import njit
+from tqdm import trange
 
 # Filter all warnings
 import warnings
@@ -267,7 +270,12 @@ class MultipleRegressor(Regressor):
         models = [None] * num_tasks
 
         try:
-            for i in range(num_tasks):
+            if self.use_progress_bar:
+                it = trange(num_tasks)
+            else:
+                it = range(num_tasks)
+            
+            for i in it:
                 models[i] = self.fit(xtrain, ytrain[:, i])
         except ValueError as e:
             if too_many_split(e):
@@ -287,6 +295,16 @@ class MultipleRegressor(Regressor):
             ypred[:, i] = self._model[i].predict(xtest)
 
         return ypred
+    
+    def set_progress_bar(self, t: bool):
+        self._progress_bar = t
+        return self
+        
+    @property
+    def use_progress_bar(self):
+        if not hasattr(self, "_progress_bar"):
+            return False
+        return self._progress_bar
 
 class BayesianRidgeRegression(MultipleRegressor):
     def __init__(self, n_iter=300, tol=1e-3, alpha_1=1e-6, alpha_2=1e-6, lambda_1=1e-6, lambda_2=1e-6):
@@ -941,7 +959,130 @@ class PolynomialRegression(Regressor):
     def can_use_electron_density(self):
         return self.degree <= 2
 
-# Idea 3: (from Professor Wong) the function behaves
+# Idea 3: (from Professor Wong) the function behaves like linear part and log part.
+# We are basically reinventing the perceptron here
+# We will take the function f(x) = mx + c if x < a else (ln(x + b - a) - ln(b))mb + ma + c
+#   with the parameters m, a, b, c. This essentially means whenever x < a, f(x) behaves like
+#   mx + c, but when x > a, f(x - a) behaves like ln(x + b). The first derivative at x = a matches up
+@njit
+def llh_objective(x, m, a, b, c):
+    if x <= a:
+        return m * x + c
+    return (np.log(x + b - a) - np.log(b)) * m * b + m * a + c
+        
+# So what we are doing is to find m, a, b, c such that |y - f(x)| MSE is minimum
+# We will also convolve the result with the Gaussian kernel to give it some additional smoothness
+# For now we will fix the mean = 0 and variance of the kernel
+# This operation is valid because we can retreive the unsmoothened case with var = 0
+# A class wrapper for the f(x) above.
+class LLHObjective:
+    def __init__(self, m, a, b, c, v):
+        self.m = m
+        self.a = a
+        self.b = b
+        self.c = c
+        self.variance = v
+    
+    def predict(self, xtest):
+        # Use a for loop to evaluate everything
+        num_tasks, _ = xtest.shape
+
+        ypred = np.zeros((num_tasks,))
+        for i in range(num_tasks):
+            ypred[i] = llh_objective(xtest[i, 0], self.m, self.a, self.b, self.c) 
+        
+        # Make the gaussian kernel
+        if self.variance > 0:
+            N = int((num_tasks - 1) / 2)
+            v = self.variance
+            gaussian_kernel = np.exp(-(np.linspace(-N, N, num_tasks)**2)/(2*v)) / np.sqrt(2*np.pi*v)        
+            ypred = np.convolve(ypred, gaussian_kernel, mode = 'same')
+        return ypred
+    
+# The regression machine
+class LLH1Regression(MultipleRegressor):
+    def __init__(self, variance = 1):
+        self.variance = variance
+    
+    def fit(self, xtrain, ytrain):
+        # Define the optimization function
+        def minimize_me(ob):
+            m, a, b, c = ob
+            model = LLHObjective(m, a, b, c, self.variance)
+            ypred = model.predict(xtrain)
+            mse = np.average((ypred - ytrain) ** 2)
+            return mse
+        
+        # Make an initial guess
+        x0 = [0.5, 30, 1, ytrain[0]]
+        bounds = [(0, 1), (0, 101), (0, 1000), (0, 1)]
+        res = minimize(minimize_me, x0, bounds=bounds, tol=1e-12)
+        model = LLHObjective(res.x[0], res.x[1], res.x[2], res.x[3], self.variance)
+        return model
+    
+    @property
+    def model_name(self):
+        return "LLH1 Regression"
+    
+    @property
+    def can_use_electron_density(self):
+        return False
+    
+# Also try to optimize variance
+class LLH2Regression(MultipleRegressor):
+    def __init__(self, initial_voltage_guess = 30):
+        self.initial_voltage_guess = initial_voltage_guess
+    
+    def fit(self, xtrain, ytrain):
+        # Define the optimization function
+        def minimize_me(ob):
+            m, a, b, c, v = ob
+            model = LLHObjective(m, a, b, c, v)
+            ypred = model.predict(xtrain)
+            mse = np.average((ypred - ytrain) ** 2)
+            return mse
+        
+        # Make an initial guess
+        x0 = [0.5, self.initial_voltage_guess, 1, ytrain[0], 1]
+        bounds = [(0, 1), (0, 101), (0, 1000), (0, 1), (0, 1000)]
+        res = minimize(minimize_me, x0, bounds=bounds, tol=1e-12)
+        model = LLHObjective(res.x[0], res.x[1], res.x[2], res.x[3], res.x[4])
+        return model
+    
+    @property
+    def model_name(self):
+        return "LLH2 Regression"
+    
+    @property
+    def can_use_electron_density(self):
+        return False
+    
+# We get a = 30 b = 1 most most of the time anyway
+# How about fix a = 30? Also fix variance = 0 because seems like convolution is not doing much good
+class LLH3Regression(MultipleRegressor):
+    def fit(self, xtrain, ytrain):
+        # Define the optimization function
+        def minimize_me(ob):
+            m, b, c = ob
+            model = LLHObjective(m, 30, b, c, 0)
+            ypred = model.predict(xtrain)
+            mse = np.average((ypred - ytrain) ** 2)
+            return mse
+        
+        # Make an initial guess
+        x0 = [0.5, 1, ytrain[0]]
+        bounds = [(0, 10), (0, 1000), (0, 10)]
+        res = minimize(minimize_me, x0, bounds=bounds, tol=1e-12)
+        model = LLHObjective(res.x[0], 30, res.x[1], res.x[2], 0)
+        return model
+    
+    @property
+    def model_name(self):
+        return "LLH3 Regression"
+    
+    @property
+    def can_use_electron_density(self):
+        return False
 
 # Import antics
 __all__ = [
@@ -964,5 +1105,8 @@ __all__ = [
     "TCEPRegression",
     "TCEPNet",
     "TCEP2Net",
-    "PolynomialRegression"
+    "PolynomialRegression",
+    "LLH1Regression",
+    "LLH2Regression",
+    "LLH3Regression"
 ]

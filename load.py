@@ -362,18 +362,29 @@ class DataVisualizer:
             col = np.abs(x - x_spacing).argmin()
             
             # Plot the values
-            plt.figure()
+            fig, ax = plt.subplots(3, 1, gridspec_kw={'height_ratios': [6, 6, 1]})
 
             # Get the values of the cell across all arrays
             for k, v in self.datas.items():
                 values = v[:, col, row]
-                plt.plot(values, label = k)
-                
-            plt.xlabel("Array index")
-            plt.ylabel("Value")
-            plt.legend()
-            plt.title("Values for cell ({}, {})".format(row, col))
-            plt.show()
+                ax[0].plot(values, label = k)
+                ax[1].plot(values, label = k)
+            
+            ax[1].set_xlabel("Array index")
+            
+            ax[0].set_ylabel("Value")
+            ax[1].set_ylabel("Value")
+            
+            ax[0].legend()
+            ax[1].legend()
+            
+            ax[1].set_yscale('log')
+            
+            ax[2].text(0, 0.5, f"Cell ({row}, {col}), Position: x = {event.xdata}, y = {event.ydata}", ha="left", va="center", fontsize=9)
+            ax[2].set_axis_off()
+            
+            fig.tight_layout()
+            fig.show()
 
         # Create the heatmap
         fig, ax = plt.subplots()

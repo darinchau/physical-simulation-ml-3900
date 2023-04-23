@@ -114,7 +114,9 @@ def models_test(regressor: Regressor, to_test: Iterable[TrainingIndex]):
     model_name = regressor.model_name
     
     train_model(regressor, to_test, f"{PATH_PREPEND}/{model_name}", use_e_density = False)
-    train_model(regressor, to_test, f"{PATH_PREPEND}/{model_name} density", use_e_density = True)
+    
+    if regressor.can_use_electron_density:
+        train_model(regressor, to_test, f"{PATH_PREPEND}/{model_name} density", use_e_density = True)
 
 ############################################
 #### Helper Functions for model testing ####
@@ -150,26 +152,63 @@ def task1():
         RidgeCVRegression(),
         GaussianRegression(),
         PolynomialRegression(2),
+        LLH1Regression(variance=0),
+        LLH1Regression(variance=0.1),
+        LLH1Regression(variance=1),
+        LLH2Regression(),
+        LLH2Regression(initial_voltage_guess=20),
+        LLH2Regression(initial_voltage_guess=40),
+        LLH2Regression(initial_voltage_guess=50),
     ], to_test = [
         TrainingIndex("First 5", range(5)),
         TrainingIndex("First 20", range(20)),
         TrainingIndex("First 30", range(30)),
         TrainingIndex("First 40", range(40)),
+        TrainingIndex("First 60", range(60)),
+        TrainingIndex("First 75", range(75)),
+        TrainingIndex("First 90", range(90)),
         TrainingIndex("_15 to 45", range(15, 45)),
         TrainingIndex("20 to 40", range(20, 40)),
         TrainingIndex("_25 to 35", range(25, 35)),
         TrainingIndex("29 and 30 and 31", [29, 30, 31]),
     ], sequential = False)
+    
+def data_visualize():
+    model_name = "LLH3 Regression"
+    
+    d = DataVisualizer()
+    d.add_data(load_elec_potential(), "Original")
+    with h5py.File(f"{PATH_PREPEND}/{model_name}/predictions.h5", 'r') as f:
+        for key in f.keys():
+            if "appear in plot" in f[key].attrs and f[key].attrs["appear in plot"] == 'false':
+                continue
+            d.add_data(f[key]["data"][:], key)
+    d.show()
   
 
 if __name__ == "__main__":
-    model_name = "Linear regression density"
+    test_all_models([
+        # LinearRegression(),
+        # RidgeCVRegression(),
+        # GaussianRegression(),
+        # PolynomialRegression(2),
+        # LLH1Regression(variance=0),
+        # LLH1Regression(variance=0.1),
+        # LLH1Regression(variance=1),
+        # LLH2Regression(),
+        LLH3Regression()
+    ], to_test = [
+        TrainingIndex("First 5", range(5)),
+        # TrainingIndex("First 20", range(20)),
+        # TrainingIndex("First 30", range(30)),
+        # TrainingIndex("_First 40", range(40)),
+        # TrainingIndex("_First 60", range(60)),
+        # TrainingIndex("_First 75", range(75)),
+        # TrainingIndex("First 90", range(90)),
+        # TrainingIndex("_15 to 45", range(15, 45)),
+        TrainingIndex("20 to 40", range(20, 40)),
+        # TrainingIndex("_25 to 35", range(25, 35)),
+        TrainingIndex("29 and 30 and 31", [29, 30, 31]),
+    ], sequential = True)
     
-    d = DataVisualizer()
-    with h5py.File(f"{PATH_PREPEND}/{model_name}/predictions.h5", 'r') as f:
-        d.add_data(f["First 20"]["data"][:], "First 20")
-        d.add_data(f["First 30"]["data"][:], "First 30")
-        d.add_data(f["20 to 40"]["data"][:], "20 to 40")
-        d.add_data(f["29 and 30 and 31"]["data"][:], "29 and 30 and 31")
-
-    d.show()
+    data_visualize()
