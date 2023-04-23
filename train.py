@@ -966,6 +966,8 @@ class PolynomialRegression(Regressor):
 #   mx + c, but when x > a, f(x - a) behaves like ln(x + b). The first derivative at x = a matches up
 @njit
 def llh_objective(x, m, a, b, c):
+    # We are operating on the index - horrible bug so here is a stitch fix
+    x /= 0.0075
     if x <= a:
         return m * x + c
     return (np.log(x + b - a) - np.log(b)) * m * b + m * a + c

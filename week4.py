@@ -155,17 +155,17 @@ def task1():
         LLH1Regression(variance=0),
         LLH1Regression(variance=0.1),
         LLH1Regression(variance=1),
-        LLH2Regression(),
-        LLH2Regression(initial_voltage_guess=20),
-        LLH2Regression(initial_voltage_guess=40),
-        LLH2Regression(initial_voltage_guess=50),
+        LLH2Regression(20),
+        LLH2Regression(30),
+        LLH2Regression(40),
+        LLH3Regression()
     ], to_test = [
         TrainingIndex("First 5", range(5)),
         TrainingIndex("First 20", range(20)),
         TrainingIndex("First 30", range(30)),
-        TrainingIndex("First 40", range(40)),
-        TrainingIndex("First 60", range(60)),
-        TrainingIndex("First 75", range(75)),
+        TrainingIndex("_First 40", range(40)),
+        TrainingIndex("_First 60", range(60)),
+        TrainingIndex("_First 75", range(75)),
         TrainingIndex("First 90", range(90)),
         TrainingIndex("_15 to 45", range(15, 45)),
         TrainingIndex("20 to 40", range(20, 40)),
@@ -187,28 +187,4 @@ def data_visualize():
   
 
 if __name__ == "__main__":
-    test_all_models([
-        # LinearRegression(),
-        # RidgeCVRegression(),
-        # GaussianRegression(),
-        # PolynomialRegression(2),
-        # LLH1Regression(variance=0),
-        # LLH1Regression(variance=0.1),
-        # LLH1Regression(variance=1),
-        # LLH2Regression(),
-        LLH3Regression()
-    ], to_test = [
-        TrainingIndex("First 5", range(5)),
-        # TrainingIndex("First 20", range(20)),
-        # TrainingIndex("First 30", range(30)),
-        # TrainingIndex("_First 40", range(40)),
-        # TrainingIndex("_First 60", range(60)),
-        # TrainingIndex("_First 75", range(75)),
-        # TrainingIndex("First 90", range(90)),
-        # TrainingIndex("_15 to 45", range(15, 45)),
-        TrainingIndex("20 to 40", range(20, 40)),
-        # TrainingIndex("_25 to 35", range(25, 35)),
-        TrainingIndex("29 and 30 and 31", [29, 30, 31]),
-    ], sequential = True)
-    
-    data_visualize()
+    task1()
