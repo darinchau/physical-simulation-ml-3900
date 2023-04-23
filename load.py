@@ -187,7 +187,6 @@ class AnimationMaker:
         if path is not None:
             writergif = animation.PillowWriter(fps=15)
             anim.save(path, writer=writergif)
-            # optimize_gif(path)
         else:
             plt.show()
 

@@ -991,8 +991,8 @@ class LLHObjective:
 
         ypred = np.zeros((num_tasks,))
         for i in range(num_tasks):
-            ypred[i] = llh_objective(xtest[i, 0], self.m, self.a, self.b, self.c) 
-        
+            ypred[i] = llh_objective(xtest[i, 0], self.m, self.a, self.b, self.c)
+
         # Make the gaussian kernel
         if self.variance > 0:
             N = int((num_tasks - 1) / 2)
@@ -1017,7 +1017,7 @@ class LLH1Regression(MultipleRegressor):
         
         # Make an initial guess
         x0 = [0.5, 30, 1, ytrain[0]]
-        bounds = [(0, 1), (0, 101), (0, 1000), (0, 1)]
+        bounds = [(0, 1), (0, 101), (0.001, 1000), (0, 1)]
         res = minimize(minimize_me, x0, bounds=bounds, tol=1e-12)
         model = LLHObjective(res.x[0], res.x[1], res.x[2], res.x[3], self.variance)
         return model
@@ -1046,7 +1046,7 @@ class LLH2Regression(MultipleRegressor):
         
         # Make an initial guess
         x0 = [0.5, self.initial_voltage_guess, 1, ytrain[0], 1]
-        bounds = [(0, 1), (0, 101), (0, 1000), (0, 1), (0, 1000)]
+        bounds = [(0, 1), (0, 101), (0.001, 1000), (0, 1), (0, 1000)]
         res = minimize(minimize_me, x0, bounds=bounds, tol=1e-12)
         model = LLHObjective(res.x[0], res.x[1], res.x[2], res.x[3], res.x[4])
         return model
@@ -1073,7 +1073,7 @@ class LLH3Regression(MultipleRegressor):
         
         # Make an initial guess
         x0 = [0.5, 1, ytrain[0]]
-        bounds = [(0, 10), (0, 1000), (0, 10)]
+        bounds = [(0, 10), (0.001, 1000), (0, 10)]
         res = minimize(minimize_me, x0, bounds=bounds, tol=1e-12)
         model = LLHObjective(res.x[0], 30, res.x[1], res.x[2], 0)
         return model

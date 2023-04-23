@@ -148,10 +148,10 @@ def test_all_models(models: list[Regressor], sequential: bool, to_test: Iterable
 
 def task1():
     test_all_models([
-        LinearRegression(),
-        RidgeCVRegression(),
-        GaussianRegression(),
-        PolynomialRegression(2),
+        # LinearRegression(),
+        # RidgeCVRegression(),
+        # GaussianRegression(),
+        # PolynomialRegression(2),
         LLH1Regression(variance=0),
         LLH1Regression(variance=0.1),
         LLH1Regression(variance=1),
@@ -171,7 +171,7 @@ def task1():
         TrainingIndex("20 to 40", range(20, 40)),
         TrainingIndex("_25 to 35", range(25, 35)),
         TrainingIndex("29 and 30 and 31", [29, 30, 31]),
-    ], sequential = False)
+    ], sequential = True)
     
 def data_visualize():
     model_name = "LLH3 Regression"
@@ -184,7 +184,6 @@ def data_visualize():
                 continue
             d.add_data(f[key]["data"][:], key)
     d.show()
-  
 
 if __name__ == "__main__":
     task1()
