@@ -56,7 +56,7 @@ def model_test(regressor: Regressor,
     model_name = regressor.model_name
 
     # Exit early if the model does not interop with electron density
-    if not (use_e_density == NO_E_DENSITY or regressor.can_use_electron_density):
+    if not (use_e_density == NO_E_DENSITY or regressor.max_num_features):
         return
 
     if use_e_density == USE_E_DENSITY:

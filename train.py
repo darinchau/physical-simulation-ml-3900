@@ -56,8 +56,8 @@ class Regressor:
         self._path = path
 
     @property
-    def can_use_electron_density(self):
-        return True
+    def max_num_features(self):
+        return 9999
 
     @property
     def model_structure(self):
@@ -170,6 +170,17 @@ class GaussianRegression(Regressor):
 
 class LinearRegression(Regressor):
     def fit(self, xtrain, ytrain):
+        model =  Linear().fit(xtrain, ytrain)
+        return model
+
+    @property
+    def model_name(self):
+        return "Linear regression"
+    
+# The linear model but used solely for debugging purposes
+class LinearDebugRegression(Regressor):
+    def fit(self, xtrain, ytrain):
+        print(f"xtrain shape: {xtrain.shape}, ytrain shape: {ytrain.shape}")
         model =  Linear().fit(xtrain, ytrain)
         return model
 
@@ -583,10 +594,6 @@ class GLH1Regression(HybridRegressor):
     def model_name(self):
         return "Gaussian Linear Hybrid 1"
 
-    @property
-    def can_use_electron_density(self):
-        return False
-
 # Idea 1.1: Use the same linear model to predict the sides, and then also feed that data into the gaussian model
 class GLH2Regression(HybridRegressor):
     def fit(self, xtrain, ytrain):
@@ -636,10 +643,6 @@ class GLH2Regression(HybridRegressor):
     def model_name(self):
         return "Gaussian Linear Hybrid 2"
 
-    @property
-    def can_use_electron_density(self):
-        return False
-
 # Idea 1.2: what if we feed the entire linear model into the Gaussian model and see what happens?
 class GLH3Regression(HybridRegressor):
     def fit(self, xtrain, ytrain):
@@ -678,11 +681,6 @@ class GLH3Regression(HybridRegressor):
     @property
     def model_name(self):
         return "Gaussian Linear Hybrid 3"
-
-    @property
-    def can_use_electron_density(self):
-        return False
-
 
 # Idea 2. The linear model seems to predict the datas really well.
 # Could we try to predict the potential increase part and the depletion part separately?
@@ -844,8 +842,8 @@ class TCEPRegression(Regressor):
         raise NotImplementedError
 
     @property
-    def can_use_electron_density(self):
-        return False
+    def max_num_features(self):
+        return 1
 
     def fit_model(self, inputs, raw_data, training_idx, verbose=False, skip_error=False):
         N = self.linear_component_N
@@ -956,8 +954,13 @@ class PolynomialRegression(Regressor):
         return f"Degree{self.degree} Regression"
     
     @property
-    def can_use_electron_density(self):
-        return self.degree <= 2
+    def max_num_features(self):
+        if self.degree == 1:
+            return 9999
+        elif self.degree == 2:
+            return 2194
+        else:
+            return 1
 
 # Idea 3: (from Professor Wong) the function behaves like linear part and log part.
 # We are basically reinventing the perceptron here
@@ -1027,8 +1030,8 @@ class LLH1Regression(MultipleRegressor):
         return "LLH1 Regression"
     
     @property
-    def can_use_electron_density(self):
-        return False
+    def max_num_features(self):
+        return 1
     
 # Also try to optimize variance
 class LLH2Regression(MultipleRegressor):
@@ -1056,8 +1059,8 @@ class LLH2Regression(MultipleRegressor):
         return "LLH2 Regression"
     
     @property
-    def can_use_electron_density(self):
-        return False
+    def max_num_features(self):
+        return 1
     
 # We get a = 30 b = 1 most most of the time anyway
 # How about fix a = 30? Also fix variance = 0 because seems like convolution is not doing much good
@@ -1083,8 +1086,8 @@ class LLH3Regression(MultipleRegressor):
         return "LLH3 Regression"
     
     @property
-    def can_use_electron_density(self):
-        return False
+    def max_num_features(self):
+        return 1
 
 # Import antics
 __all__ = [
@@ -1096,6 +1099,7 @@ __all__ = [
     "SGDRegression",
     "PassiveAggressiveRegression",
     "LinearRegression",
+    "LinearDebugRegression",
     "MultiTaskLassoCVRegression",
     "MultiTaskElasticNetCVRegression",
     "BayesianRidgeRegression",

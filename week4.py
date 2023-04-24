@@ -31,13 +31,18 @@ def create_folder_directory(folder_path):
             i += 1
 
 # Get the first n inputs as inputs, data and train index
-def get_data(use_e_density: bool):
+def get_data(use_e_density: bool, use_space_charge: bool):
     inputs = (np.arange(101)*0.75/100).reshape((101, 1))
     
     if use_e_density:
         e_density = load_e_density().reshape((101, 2193))
         e_density /= np.max(e_density)
         inputs = np.concatenate([inputs, e_density], axis = 1)
+        
+    if use_space_charge:
+        space_charge = load_space_charge().reshape((101, 2193))
+        space_charge /= np.max(np.abs(space_charge))
+        inputs = np.concatenate([inputs, space_charge], axis = 1)
     
     data = load_elec_potential()
     return inputs, data
@@ -55,7 +60,8 @@ class TrainingIndex:
 def train_model(regressor: Regressor,
                to_test: Iterable[TrainingIndex],
                path: str,
-               use_e_density = False):
+               use_e_density = False,
+               use_space_charge = False):
     # Retreive the model name
     model_name = path.split("/")[-1]
     
@@ -71,7 +77,7 @@ def train_model(regressor: Regressor,
 
     for idx in to_test:
         # Preprocess the data
-        inputs, data = get_data(use_e_density)
+        inputs, data = get_data(use_e_density, use_space_charge)
         
         # Get the training idx
         train_idx = list(idx)
@@ -104,9 +110,6 @@ def train_model(regressor: Regressor,
         f.write("\n\n")
         f.write(regressor.train_info)
 
-    # Make some animations
-    make_plots(path, model_name)
-
 # Helper function to test the model both with and without electron density
 # This is to interop with space charge stuff in the future
 def models_test(regressor: Regressor, to_test: Iterable[TrainingIndex]):
@@ -115,9 +118,13 @@ def models_test(regressor: Regressor, to_test: Iterable[TrainingIndex]):
     
     train_model(regressor, to_test, f"{PATH_PREPEND}/{model_name}", use_e_density = False)
     
-    if regressor.can_use_electron_density:
-        train_model(regressor, to_test, f"{PATH_PREPEND}/{model_name} density", use_e_density = True)
-
+    if regressor.max_num_features >= 2194:
+        train_model(regressor, to_test, f"{PATH_PREPEND}/{model_name}-d", use_e_density = True)
+        train_model(regressor, to_test, f"{PATH_PREPEND}/{model_name}-sc", use_space_charge = True)
+    
+    if regressor.max_num_features >= 4386:
+        train_model(regressor, to_test, f"{PATH_PREPEND}/{model_name}-scd", use_space_charge = True, use_e_density = True)
+        
 ############################################
 #### Helper Functions for model testing ####
 ############################################
@@ -146,49 +153,38 @@ def test_all_models(models: list[Regressor], sequential: bool, to_test: Iterable
 
     print(f"Total time taken: {round(time.time() - t, 3)}")
 
-def task1():
+def training_1():
     test_all_models([
         LinearRegression(),
         RidgeCVRegression(),
         GaussianRegression(),
         PolynomialRegression(2),
+        GLH1Regression(),
+        GLH2Regression(),
         LLH1Regression(variance=0),
         LLH1Regression(variance=0.1),
         LLH1Regression(variance=1),
-        LLH2Regression(20),
-        LLH2Regression(30),
-        LLH2Regression(40),
+        LLH2Regression(),
         LLH3Regression()
     ], to_test = [
         TrainingIndex("First 5", range(5)),
         TrainingIndex("First 20", range(20)),
         TrainingIndex("First 30", range(30)),
-        TrainingIndex("_First 40", range(40)),
-        TrainingIndex("_First 60", range(60)),
-        TrainingIndex("_First 75", range(75)),
+        TrainingIndex("First 40", range(40)),
+        TrainingIndex("First 60", range(60)),
+        TrainingIndex("First 75", range(75)),
         TrainingIndex("First 90", range(90)),
-        TrainingIndex("_15 to 45", range(15, 45)),
+        TrainingIndex("15 to 45", range(15, 45)),
         TrainingIndex("20 to 40", range(20, 40)),
-        TrainingIndex("_25 to 35", range(25, 35)),
+        TrainingIndex("40 to 60", range(40, 60)),
+        TrainingIndex("25 to 35", range(25, 35)),
         TrainingIndex("29 and 30 and 31", [29, 30, 31]),
     ], sequential = True)
-
-# Feed in model name, show the interactive data visualizer
-def data_visualize(model_name):    
-    d = DataVisualizer()
-    d.add_data(load_elec_potential(), "Original")
-    with h5py.File(f"{PATH_PREPEND}/{model_name}/predictions.h5", 'r') as f:
-        for key in f.keys():
-            if "appear in plot" in f[key].attrs and f[key].attrs["appear in plot"] == 'false':
-                continue
-            d.add_data(f[key]["data"][:], key)
-    d.show()
 
 # Shows the distribution of the log of the data
 def show_log_distribution(data, data_name: str):
     data = np.array(data)
-    data[data <= 0] = np.min(data[data > 0])
-    data = np.log(data)
+    data = np.log10(data[data > 0])
     min_log = int(np.min(data)) - 1
     max_log = int(np.max(data)) + 1
     
@@ -214,20 +210,29 @@ def plot_data():
     anim = AnimationMaker()
     
     anim.add_data(load_elec_potential(), "Electric potential")
-    anim.add_data(load_e_density(), "Electron density", 1e13)
-    anim.add_data(load_log_e_density(), "Electron density (log(x))", 13)
+    anim.add_data(load_e_density(), "Electron density", vmin = 1e13)
+    anim.add_data(load_log_e_density(), "Electron density (log(x))", vmin = 13)
     anim.add_data(load_space_charge(), "Space charge")
     
     lsc = np.abs(load_space_charge())
     lsc[lsc == 0] = 1
     lsc = np.log10(lsc)
 
-    anim.add_data(lsc, "Space charge (log|x|)", 13)
+    anim.add_data(lsc, "Space charge (log|x|)", vmin = 13)
+    
+    # anim.add_data(load_space_charge(), "Space charge log", norm = 'log', vmin = 1e13, vmax = 1e20)
     anim.add_text([f"Frame {i} - {i * 0.0075:.4f}V" for i in range(101)])
     
     anim.save("data.gif")
+    
+def plot_data_2(model_name):
+    d = DataVisualizer()
+    with h5py.File(f"{PATH_PREPEND}/{model_name}/predictions.h5", 'r') as f:
+        for key in ("First 20", "First 90", "20 to 40"):
+            d.add_data(f[key]["data"][:], key)
+    d.add_data(load_elec_potential(), "Original", thickness=3)
+    d.show(show_log_plot = False)
+
 
 if __name__ == "__main__":
-    # plot_data()
-    show_log_distribution(load_space_charge(), "Space charge")
-    show_log_distribution(load_e_density(), "Space charge")
+    training_1()

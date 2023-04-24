@@ -53,24 +53,14 @@ def split_data(ins, train_idx):
 def save_h5(d: dict[str, NDArray], path: str):
     # Open an HDF5 file in write mode
     with h5py.File(path, 'w') as f:
-
         # Enable compression with gzip and set compression level to 6
         f.attrs.create('compression', 'gzip')
         f.attrs.create('compression_level', 6)
 
         # Loop through dictionary keys and add them as groups to the file
         for key in d.keys():
-            if key[0] == "_":
-                group = f.create_group(key[1:])
-                group.attrs["appear in plot"] = 'false'
-            else:
-                group = f.create_group(key)
-                group.attrs["appear in plot"] = 'true'
-
-            # Add the numpy array value to the group and enable compression
-            dataset = group.create_dataset('data', data=d[key])
-            dataset.attrs.create('compression', 'gzip')
-            dataset.attrs.create('compression_level', 6)
+            group = f.create_group(key)
+            dataset = group.create_dataset('data', data=d[key], compression="gzip", compression_opts=9)
 
 # Helper function to load and print the structure of a h5
 def peek_h5(path: str):
@@ -96,7 +86,7 @@ class AnimationMaker:
         self.height_ratios = []
         self.nframes = None
 
-    def add_data(self, data, title: str, vmin: int | float | None = None, vmax: int | float | None = None):
+    def add_data(self, data, title: str, vmin: int | float | None = None, vmax: int | float | None = None, norm: str | None = None):
         if self.nframes is None:
             self.nframes = len(data)
         else:
@@ -106,7 +96,7 @@ class AnimationMaker:
             vmin = np.min(data)
         if vmax is None:
             vmax = np.max(data)
-        self.datas.append((np.array(data), title, vmin, vmax))
+        self.datas.append((np.array(data), title, vmin, vmax, norm))
         self.height_ratios.append(5)
         return self
 
@@ -145,13 +135,17 @@ class AnimationMaker:
         for i in range(num_data):
             # Plot an animation
             if self.height_ratios[i] == 5:
-                data, title, vmin, vmax = self.datas[i]
+                data, title, vmin, vmax, norm = self.datas[i]
 
                 axes[i].set_aspect("equal", adjustable="box")
                 axes[i].set_ylabel("Y", va="bottom")
                 axes[i].set_title(title)
                 axes[i].set_yticks([])
-                heatmap = axes[i].pcolormesh(x, y, np.transpose(data[0]), cmap="hot", vmin=vmin, vmax=vmax)
+                
+                if norm is not None and norm == 'log':
+                    heatmap = axes[i].pcolormesh(x, y, np.transpose(data[0]), cmap="hot", norm=LogNorm(vmin=vmin, vmax=vmax))
+                else:
+                    heatmap = axes[i].pcolormesh(x, y, np.transpose(data[0]), cmap="hot", vmin=vmin, vmax=vmax)
 
                 # colorbar
                 cbar = fig.colorbar(heatmap, ax=axes[i])
@@ -268,7 +262,9 @@ class StaticPlotMaker:
 
 # Takes a path, reads the predictions inside and generate all sorts of animations/plots
 # If you want to add extra plots, this is the function you have to worry about
-def make_plots(path, model_name = None):
+# include_in_error is a variable which contains a list of strings to include in the error plots
+# If none, then include everything
+def make_plots(path, model_name = None, include_in_error: list[str] | None = None):
     # Retreive the model name from the path if the user did not provide explicitly
     if model_name is None:
         model_name = path.split("/")[-1]
@@ -288,6 +284,13 @@ def make_plots(path, model_name = None):
     frame_mid_potential.set("Original", np.average(data_mid.reshape((101, -1)), axis = 1))
 
     with h5py.File(f"{path}/predictions.h5", 'r') as f:
+        # Make a customary error message if we happen to make a typo in the list
+        if include_in_error is not None:
+            for key in include_in_error:
+                if key not in f.keys():
+                    print(f"The key {key} is not found in the file.")
+        
+        # Loop through all the keys to make the animation and calculate the error
         for key in f.keys():
             # Prediction, the "take everythign" slice index is to change it to numpy array
             pred = f[key]['data'][:]
@@ -296,7 +299,7 @@ def make_plots(path, model_name = None):
             make_anim(pred, original_data, f"{path}/{key}.gif", f"Results from {model_name} {key}")
             
             # If we indicate to not appear in plot, then skip everything else here
-            if "appear in plot" in f[key].attrs and f[key].attrs["appear in plot"] == 'false':
+            if include_in_error is None or key not in include_in_error:
                 continue
 
             # Split the middle region and outer region
@@ -331,16 +334,29 @@ def make_plots(path, model_name = None):
         frame_rmse_outer.plot(f"{model_name} Outer RMSE", path)
         frame_mid_potential.plot(f"{model_name} mid potential", path, title = f"Electric potential of gate region from {model_name}")
 
+# Feed in model name, show the interactive data visualizer
+def visualize_data(path):    
+    d = DataVisualizer()
+    with h5py.File(f"{path}/predictions.h5", 'r') as f:
+        for key in f.keys():
+            if "appear in plot" in f[key].attrs and f[key].attrs["appear in plot"] == 'false':
+                continue
+            d.add_data(f[key]["data"][:], key)
+    d.add_data(load_elec_potential(), "Original")
+    d.show()
+
 class DataVisualizer:
     def __init__(self, cover = None) -> None:
         self.datas = {}
-        if self.cover is None:
+        if cover is None:
             self.cover = load_elec_potential()
+        else:
+            self.cover = cover
     
-    def add_data(self, data, name):
-        self.datas[name] = np.array(data)
+    def add_data(self, data, name, thickness = 1.5):
+        self.datas[name] = (np.array(data), thickness)
     
-    def show(self):        
+    def show(self, show_log_plot = True):        
         # Load the spacing
         x_spacing, y_spacing = load_spacing()
         x_grid, y_grid = np.meshgrid(x_spacing, y_spacing)
@@ -364,30 +380,48 @@ class DataVisualizer:
             row = np.abs(y - y_spacing).argmin()
             col = np.abs(x - x_spacing).argmin()
             
-            # Plot the values
-            fig, ax = plt.subplots(3, 1, gridspec_kw={'height_ratios': [6, 6, 1]})
+            if show_log_plot:
+                # Plot the values
+                fig, ax = plt.subplots(3, 1, gridspec_kw={'height_ratios': [6, 6, 1]})
 
-            # Get the values of the cell across all arrays
-            for k, v in self.datas.items():
-                values = v[:, col, row]
-                ax[0].plot(values, label = k)
-                ax[1].plot(values, label = k)
-            
-            ax[1].set_xlabel("Array index")
-            
-            ax[0].set_ylabel("Value")
-            ax[1].set_ylabel("Value")
-            
-            ax[0].legend()
-            ax[1].legend()
-            
-            ax[1].set_yscale('log')
-            
-            ax[2].text(0, 0.5, f"Cell ({row}, {col}), Position: x = {event.xdata}, y = {event.ydata}", ha="left", va="center", fontsize=9)
-            ax[2].set_axis_off()
-            
-            fig.tight_layout()
-            fig.show()
+                # Get the values of the cell across all arrays
+                for k, (v, t) in self.datas.items():
+                    values = v[:, col, row]
+                    ax[0].plot(values, label = k, linewidth = t)
+                    ax[1].plot(values, label = k, linewidth = t)
+                
+                ax[1].set_xlabel("Array index")
+                
+                ax[0].set_ylabel("Value")
+                ax[1].set_ylabel("Value")
+                
+                ax[0].legend()
+                ax[1].legend()
+                
+                ax[1].set_yscale('log')
+                
+                ax[2].text(0, 0.5, f"Cell ({row}, {col}), Position: x = {event.xdata}, y = {event.ydata}", ha="left", va="center", fontsize=9)
+                ax[2].set_axis_off()
+                
+                fig.tight_layout()
+                fig.show()
+            else:
+                # Plot the values
+                fig, ax = plt.subplots(2, 1, gridspec_kw={'height_ratios': [6, 1]})
+
+                # Get the values of the cell across all arrays
+                for k, (v, t) in self.datas.items():
+                    values = v[:, col, row]
+                    ax[0].plot(values, label = k, linewidth = t)
+                
+                ax[0].set_xlabel("Array index")
+                ax[0].set_ylabel("Value")
+                ax[0].legend()
+                ax[1].text(0, 0.5, f"Cell ({row}, {col}), Position: x = {event.xdata}, y = {event.ydata}", ha="left", va="center", fontsize=9)
+                ax[1].set_axis_off()
+                
+                fig.tight_layout()
+                fig.show()
 
         # Create the heatmap
         fig, ax = plt.subplots()
