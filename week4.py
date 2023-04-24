@@ -148,10 +148,10 @@ def test_all_models(models: list[Regressor], sequential: bool, to_test: Iterable
 
 def task1():
     test_all_models([
-        # LinearRegression(),
-        # RidgeCVRegression(),
-        # GaussianRegression(),
-        # PolynomialRegression(2),
+        LinearRegression(),
+        RidgeCVRegression(),
+        GaussianRegression(),
+        PolynomialRegression(2),
         LLH1Regression(variance=0),
         LLH1Regression(variance=0.1),
         LLH1Regression(variance=1),
@@ -172,10 +172,9 @@ def task1():
         TrainingIndex("_25 to 35", range(25, 35)),
         TrainingIndex("29 and 30 and 31", [29, 30, 31]),
     ], sequential = True)
-    
-def data_visualize():
-    model_name = "LLH3 Regression"
-    
+
+# Feed in model name, show the interactive data visualizer
+def data_visualize(model_name):    
     d = DataVisualizer()
     d.add_data(load_elec_potential(), "Original")
     with h5py.File(f"{PATH_PREPEND}/{model_name}/predictions.h5", 'r') as f:
@@ -185,5 +184,49 @@ def data_visualize():
             d.add_data(f[key]["data"][:], key)
     d.show()
 
+# Shows the distribution of the log of the data
+def show_log_distribution(data, data_name: str):
+    data = np.array(data)
+    data[data <= 0] = np.min(data[data > 0])
+    data = np.log(data)
+    min_log = int(np.min(data)) - 1
+    max_log = int(np.max(data)) + 1
+    
+    x, y = [], []
+    for i in range(min_log, max_log):
+        count = ((i < data) & (data < i+1)).sum()
+        x.append(i)
+        y.append(count)
+    
+    fig, ax = plt.subplots()
+    ax.bar(x, y)
+    fig.suptitle(f"Log distribution of {data_name}")
+    fig.savefig(f"{data_name}.png")
+    
+    try:
+        ax.set_yscale('log')
+        fig.savefig(f"{data_name} log.png")
+    except ValueError:
+        pass
+    
+    
+def plot_data():
+    anim = AnimationMaker()
+    
+    anim.add_data(load_elec_potential(), "Electric potential")
+    anim.add_data(load_e_density(), "Electron density", 1e13)
+    anim.add_data(load_log_e_density(), "Electron density (log(x))", 13)
+    anim.add_data(load_space_charge(), "Space charge")
+    
+    lsc = np.abs(load_space_charge())
+    lsc[lsc == 0] = 1
+    lsc = np.log10(lsc)
+
+    anim.add_data(lsc, "Space charge (log|x|)", 13)
+    anim.add_text([f"Frame {i} - {i * 0.0075:.4f}V" for i in range(101)])
+    
+    anim.save("data.gif")
+
 if __name__ == "__main__":
-    task1()
+    # plot_data()
+    show_log_distribution(load_space_charge(), "Space charge")

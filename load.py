@@ -13,6 +13,7 @@ SPACING_X = np.load("mesh_data_x.npy")
 SPACING_Y = np.load("mesh_data_y.npy")
 ELECTRIC_POTENTIAL = np.load("mesh_data_electrostatic_potential.npy")
 ELECTRON_DENSITY = np.load("mesh_data_edensity.npy")
+SPACE_CHARGE = np.load("mesh_data_space_charge.npy")
 
 def optimize_gif(path):
     # Uses the gifsicle library
@@ -35,6 +36,9 @@ def load_e_density():
 
 def load_spacing():
     return np.array(SPACING_X), np.array(SPACING_Y)
+
+def load_space_charge():
+    return np.nan_to_num(SPACE_CHARGE, nan=0)
 
 def load_log_e_density():
     log_e_density = load_e_density()
@@ -92,7 +96,7 @@ class AnimationMaker:
         self.height_ratios = []
         self.nframes = None
 
-    def add_data(self, data, title, vmin = None, vmax = None):
+    def add_data(self, data, title: str, vmin: int | float | None = None, vmax: int | float | None = None):
         if self.nframes is None:
             self.nframes = len(data)
         else:
@@ -328,15 +332,15 @@ def make_plots(path, model_name = None):
         frame_mid_potential.plot(f"{model_name} mid potential", path, title = f"Electric potential of gate region from {model_name}")
 
 class DataVisualizer:
-    def __init__(self) -> None:
+    def __init__(self, cover = None) -> None:
         self.datas = {}
+        if self.cover is None:
+            self.cover = load_elec_potential()
     
     def add_data(self, data, name):
         self.datas[name] = np.array(data)
     
-    def show(self):
-        data = load_elec_potential()
-        
+    def show(self):        
         # Load the spacing
         x_spacing, y_spacing = load_spacing()
         x_grid, y_grid = np.meshgrid(x_spacing, y_spacing)
@@ -391,11 +395,11 @@ class DataVisualizer:
         ax.set_aspect("equal", adjustable="box")
         ax.set_ylabel("Y", va="bottom")
         ax.set_yticks([])
-        heatmap = ax.pcolormesh(x_grid, y_grid, np.transpose(data[0]), cmap="hot", vmin = np.min(data), vmax = np.max(data))
+        heatmap = ax.pcolormesh(x_grid, y_grid, np.transpose(self.cover[0]), cmap="hot", vmin = np.min(self.cover), vmax = np.max(self.cover))
 
         cbar = fig.colorbar(heatmap, ax=ax)
         cbar.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
-        tk = np.round(np.linspace(np.min(data), np.max(data), 4, endpoint=True), 2)
+        tk = np.round(np.linspace(np.min(self.cover), np.max(self.cover), 4, endpoint=True), 2)
         cbar.set_ticks(tk)
 
         # Add a title
