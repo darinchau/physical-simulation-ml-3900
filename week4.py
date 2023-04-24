@@ -230,3 +230,4 @@ def plot_data():
 if __name__ == "__main__":
     # plot_data()
     show_log_distribution(load_space_charge(), "Space charge")
+    show_log_distribution(load_e_density(), "Space charge")
