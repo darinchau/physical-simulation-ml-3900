@@ -14,7 +14,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # The folder that contains the generated data
-FOLDER_NAME = "./Datas/Week 3"
+FOLDER_NAME = "./Datas/Week 4"
 
 # The list of training results to include in the error plots
 # We will still make all the animations regardless of this list
@@ -30,7 +30,7 @@ RESULTS_TO_INCLUDE = [
 def main():
     processes = []
     for path in os.listdir(FOLDER_NAME):
-        p = Process(target=make_plots, args=(f"{FOLDER_NAME}/{path}",))
+        p = Process(target=make_plots, args=(f"{FOLDER_NAME}/{path}", None, RESULTS_TO_INCLUDE))
         p.start()
         processes.append(p)
 

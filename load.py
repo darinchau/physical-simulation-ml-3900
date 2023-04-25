@@ -52,13 +52,12 @@ def split_data(ins, train_idx):
 ### Save h5 files
 def save_h5(d: dict[str, NDArray], path: str):
     # Open an HDF5 file in write mode
-    with h5py.File(path, 'w') as f:
-        # Enable compression with gzip and set compression level to 6
-        f.attrs.create('compression', 'gzip')
-        f.attrs.create('compression_level', 6)
-
+    with h5py.File(path, 'a') as f:
         # Loop through dictionary keys and add them as groups to the file
         for key in d.keys():
+            # If key already exists then keep the original data
+            if key in f:
+                continue
             group = f.create_group(key)
             dataset = group.create_dataset('data', data=d[key], compression="gzip", compression_opts=9)
 
@@ -112,6 +111,7 @@ class AnimationMaker:
         return self
 
     def save(self, path, suptitle = ""):
+        # If nframes if not set this means there is no data to plot
         if self.nframes is None:
             raise ValueError("No data to plot")
         
@@ -292,14 +292,15 @@ def make_plots(path, model_name = None, include_in_error: list[str] | None = Non
         
         # Loop through all the keys to make the animation and calculate the error
         for key in f.keys():
-            # Prediction, the "take everythign" slice index is to change it to numpy array
+            # Prediction, the "take everything" slice index is to change it to numpy array
             pred = f[key]['data'][:]
             
             # Animation :D
             make_anim(pred, original_data, f"{path}/{key}.gif", f"Results from {model_name} {key}")
             
             # If we indicate to not appear in plot, then skip everything else here
-            if include_in_error is None or key not in include_in_error:
+            # If include_in_error is none that means include everything
+            if include_in_error is not None and key not in include_in_error:
                 continue
 
             # Split the middle region and outer region

@@ -186,7 +186,7 @@ class LinearDebugRegression(Regressor):
 
     @property
     def model_name(self):
-        return "Linear regression"
+        return "ZZZDebug Regression"
 
 class RidgeCVRegression(Regressor):
     def __init__(self, cv=5):
