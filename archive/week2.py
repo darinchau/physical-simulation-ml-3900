@@ -7,7 +7,7 @@ import time
 from load import *
 import numpy as np
 import matplotlib.pyplot as plt
-from train import *
+from models import *
 from tqdm import tqdm
 import re
 from multiprocessing import Process

@@ -8,7 +8,7 @@ from torchinfo import summary
 import time
 import matplotlib.pyplot as plt
 from math import log
-from train import Regressor
+from models import Regressor
 
 # Filter all warnings
 import warnings

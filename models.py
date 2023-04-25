@@ -1111,13 +1111,44 @@ class LLH4Regression(HybridRegressor):
     @property
     def model_name(self):
         return "Linear Log Hybrid 4"
-    
-class LinearGradientRegressor(Regressor):
-    def fit_data(self, xtrain, ytrain):
-        vgap = 0.0075
-        ddy = (ytrain[0:-2] + ytrain[2:] - 2 * ytrain[1:-1]) / vgap / vgap
-        model = Linear().fit(xtrain[1:-1], ddy)
 
+class LLH5Regression(Regressor):
+    def fit_data(self, xtrain, ytrain):
+        poly = PolynomialFeatures(degree=2, include_bias=False)
+        lin = Linear()
+        
+        if xtrain.shape[1] == 2194:
+            vg = xtrain[:, :1]
+            a = xtrain.shape[0]
+            x = xtrain[:, 1:].reshape((a, 129, 17))[:, :, :11].reshape((a, -1))
+            xtrain = np.concatenate([vg, x], axis = 1)
+
+        xpoly = poly.fit_transform(xtrain)
+        ex = np.exp(xtrain)
+        xex = np.exp(xtrain) * xtrain
+        x2ex = np.exp(xtrain) * xtrain * xtrain
+        new_x_train = np.concatenate([xpoly, ex, xex, x2ex], axis = 1)
+        
+        lin.fit(new_x_train, ytrain)
+        return lin
+
+    def predict(self, xtest):
+        poly = PolynomialFeatures(degree=2, include_bias=False)
+        xpoly = poly.fit_transform(xtest)
+        ex = np.exp(xtest)
+        xex = np.exp(xtest) * xtest
+        x2ex = np.exp(xtest) * xtest * xtest
+        new_x = np.concatenate([xpoly, ex, xex, x2ex], axis = 1)
+        
+        return self.model.predict(new_x)
+
+    @property
+    def model_name(self):
+        return f"Linear Log Hybrid 5"
+    
+    @property
+    def max_num_features(self):
+        return 2195
 
 # Import antics
 __all__ = [
@@ -1146,4 +1177,5 @@ __all__ = [
     "LLH2Regression",
     "LLH3Regression",
     "LLH4Regression",
+    "LLH5Regression"
 ]
