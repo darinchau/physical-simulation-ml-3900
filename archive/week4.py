@@ -8,7 +8,7 @@ import time
 from load import *
 import numpy as np
 import matplotlib.pyplot as plt
-from archive.models import *
+from archive.train import *
 from tqdm import tqdm
 from multiprocessing import Process
 from typing import Iterable

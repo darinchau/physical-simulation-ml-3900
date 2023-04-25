@@ -1,6 +1,6 @@
 ## This module is code from week one. We try to keep everything outside
 
-from archive.models import train_mlp, train_gaussian_process
+from archive.train import train_mlp, train_gaussian_process
 import numpy as np
 import torch
 from torch import nn
@@ -13,7 +13,7 @@ import numpy as np
 import torch.optim as optim
 from tqdm import trange
 from lazypredict.Supervised import LazyRegressor
-from archive.models import GaussianRegression
+from archive.train import GaussianRegression
 from matplotlib import animation
 
 def wrap_data(ins, data, train_idx: tuple[int, ...]):
