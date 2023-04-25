@@ -62,13 +62,12 @@ def create_folder_directory(folder_path, model_name: str, regressor: Regressor):
             return folder_path
     
     # Create something like Model (1), Model (2) and so on
-    i = 1
-    while True:
-        new_path = f"{folder_path} ({i})"
-        if not os.path.exists(new_path):
-            os.makedirs(new_path)
-            return new_path
-        i += 1
+    if '(' not in folder_path.split("/")[-1]:
+        return create_folder_directory(f"{folder_path} (1)", model_name, regressor)
+    
+    num = int(folder_path.split("(")[1][:-1])
+    path = folder_path.split("(")[0][:-1]
+    return create_folder_directory(f"{path} ({num + 1})", model_name, regressor)
 
 # Takes in a regressor and trains the regressor on 1 - 101 samples
 # to_test: An iterator of numbers for the "n" in first n data
@@ -168,9 +167,8 @@ def training_1():
         LinearRegression(),
         RidgeCVRegression(),
         GaussianRegression(),
-        PolynomialRegression(2),
+        # PolynomialRegression(2),
         GLH1Regression(),
-        GLH2Regression(),
         LLH1Regression(variance=0),
         LLH1Regression(variance=0.1),
         LLH1Regression(variance=1),
@@ -245,6 +243,15 @@ def plot_data_2(model_name):
 if __name__ == "__main__":
     test_all_models([
         LinearRegression(),
+        RidgeCVRegression(),
+        GaussianRegression(),
+        GLH1Regression(),
+        LLH1Regression(variance=0),
+        LLH1Regression(variance=0.1),
+        LLH1Regression(variance=1),
+        LLH2Regression(),
+        LLH3Regression(),
+        LLH4Regression(),
     ], to_test = [
         TrainingIndex("First 5", range(5)),
         TrainingIndex("First 20", range(20)),
@@ -261,3 +268,4 @@ if __name__ == "__main__":
         TrainingIndex("30 to 50", range(30, 50)),
         TrainingIndex("29 and 30 and 31", [29, 30, 31]),
     ], sequential = True)
+

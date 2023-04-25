@@ -203,7 +203,7 @@ class NeuralNetworkRegressor(Regressor):
 
         return err
 
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         raise NotImplementedError
 
     @virtual

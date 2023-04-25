@@ -42,8 +42,13 @@ class Regressor:
 
     @virtual
     # Takes in xtrain and ytrain and outputs the model. The outputted model will be saved to a self.model attribute
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         raise NotImplementedError
+    
+    # This fit method should be same as fit unless inherited from specific model structures like multiple regressor
+    # This is so that compound models are implemented hassle-free
+    def fit(self, xtrain, ytrain):
+        return self.fit_data(xtrain, ytrain)
 
     @property
     def model(self):
@@ -152,7 +157,7 @@ class Regressor:
         self._model = model
 
 class GaussianRegression(Regressor):
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         # Define the kernel function
         kernel = RBF(length_scale=1.0)
 
@@ -169,7 +174,7 @@ class GaussianRegression(Regressor):
         return "Gaussian process"
 
 class LinearRegression(Regressor):
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         model =  Linear().fit(xtrain, ytrain)
         return model
 
@@ -179,7 +184,7 @@ class LinearRegression(Regressor):
     
 # The linear model but used solely for debugging purposes
 class LinearDebugRegression(Regressor):
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         print(f"xtrain shape: {xtrain.shape}, ytrain shape: {ytrain.shape}")
         model =  Linear().fit(xtrain, ytrain)
         return model
@@ -192,11 +197,8 @@ class RidgeCVRegression(Regressor):
     def __init__(self, cv=5):
         self.cv = cv
 
-    def fit(self, xtrain, ytrain):
-        # Fit the RidgeCV regression model on the training data
+    def fit_data(self, xtrain, ytrain):
         model = RidgeCV(cv=self.cv).fit(xtrain, ytrain)
-
-        # Return the trained model
         return model
 
     @property
@@ -208,27 +210,20 @@ class MultiTaskElasticNetCVRegression(Regressor):
         self.l1_ratio = l1_ratio
         self.cv = cv
 
-    def fit(self, xtrain, ytrain):
-        # Fit the MultiTaskElasticNetCV regression model on the training data
+    def fit_data(self, xtrain, ytrain):
         model = MultiTaskElasticNetCV(l1_ratio=self.l1_ratio, cv=self.cv).fit(xtrain, ytrain)
-
-        # Return the trained model
         return model
 
     @property
     def model_name(self):
         return "MultiTaskElasticNetCV Regression"
 
-
 class MultiTaskLassoCVRegression(Regressor):
     def __init__(self, cv=5):
         self.cv = cv
 
-    def fit(self, xtrain, ytrain):
-        # Fit the MultiTaskLassoCV regression model on the training data
+    def fit_data(self, xtrain, ytrain):
         model = MultiTaskLassoCV(cv=self.cv).fit(xtrain, ytrain)
-
-        # Return the trained model
         return model
 
     @property
@@ -250,7 +245,7 @@ class DecisionTreeRegression(Regressor):
         self.max_leaf_nodes = max_leaf_nodes
         self.min_impurity_decrease = min_impurity_decrease
 
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         return DecisionTree(criterion=self.criterion, splitter=self.splitter, max_depth=self.max_depth,
                                       min_samples_split=self.min_samples_split, min_samples_leaf=self.min_samples_leaf,
                                       min_weight_fraction_leaf=self.min_weight_fraction_leaf, max_features=self.max_features,
@@ -267,45 +262,37 @@ class DecisionTreeRegression(Regressor):
 #### and make them predict multiple features by making them predict single features independently and separately ####
 #####################################################################################################################
 class MultipleRegressor(Regressor):
-    # Preprocess, fit data, and calculate error
-    def fit_model(self, inputs, raw_data, training_idx, verbose = False, skip_error = False):
-        # Split data
-        xtrain, xtest, ytrain, ytest = self.preprocess(inputs, raw_data, training_idx)
-
+    def fit(self, xtrain, ytrain):
         # Number of predictions needed to be made
-        _, num_tasks = ytest.shape
-
-        # Train the model
-        np.random.seed(12345)
-
+        _, num_tasks = ytrain.shape
+        
         models = [None] * num_tasks
-
-        try:
-            if self.use_progress_bar:
-                it = trange(num_tasks)
-            else:
-                it = range(num_tasks)
+        
+        if self.use_progress_bar:
+            it = trange(num_tasks)
+        else:
+            it = range(num_tasks)
+        
+        for i in it:
+            models[i] = self.fit_data(xtrain, ytrain[:, i])
             
-            for i in it:
-                models[i] = self.fit(xtrain, ytrain[:, i])
-        except ValueError as e:
-            if too_many_split(e):
-                raise RegressorFitError()
-            else:
-                raise e
+        # Use a class wrapper so predict can be called on this thing
+        class MultipleRegressorModule:
+            def __init__(self, models):
+                self._model = models
+            
+            def predict(self, xtest):
+                num_tasks = len(self._model)
+                num_samples = len(xtest)
 
-        self._model = models
+                ypred = np.zeros((num_samples, num_tasks))
 
-    def predict(self, xtest):
-        num_tasks = len(self._model)
-        num_samples = len(xtest)
+                for i in range(num_tasks):
+                    ypred[:, i] = self._model[i].predict(xtest)
 
-        ypred = np.zeros((num_samples, num_tasks))
-
-        for i in range(num_tasks):
-            ypred[:, i] = self._model[i].predict(xtest)
-
-        return ypred
+                return ypred
+        
+        return MultipleRegressorModule(models)
     
     def set_progress_bar(self, t: bool):
         self._progress_bar = t
@@ -326,7 +313,7 @@ class BayesianRidgeRegression(MultipleRegressor):
         self.lambda_1 = lambda_1
         self.lambda_2 = lambda_2
 
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         return BayesianRidge(n_iter=self.n_iter, tol=self.tol, alpha_1=self.alpha_1, alpha_2=self.alpha_2,
                              lambda_1=self.lambda_1, lambda_2=self.lambda_2).fit(xtrain, ytrain)
 
@@ -343,7 +330,7 @@ class SGDRegression(MultipleRegressor):
         self.max_iter = max_iter
         self.tol = tol
 
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         return SGD(loss=self.loss, penalty=self.penalty, alpha=self.alpha, l1_ratio=self.l1_ratio,
                              max_iter=self.max_iter, tol=self.tol).fit(xtrain, ytrain)
 
@@ -358,7 +345,7 @@ class PassiveAggressiveRegression(MultipleRegressor):
         self.max_iter = max_iter
         self.tol = tol
 
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         return PassiveAggressive(C=self.C, fit_intercept=self.fit_intercept,
                                           max_iter=self.max_iter, tol=self.tol).fit(xtrain, ytrain)
 
@@ -532,7 +519,7 @@ class SimpleNet(NeuralNetwork):
         return self.fc(x)
 
 class SimpleNetRegression(Regressor):
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         model = self.register_net(SimpleNet())
         return model.fit(xtrain, ytrain, model_name=self.model_name, input_name=f"First {xtrain.shape[0]}", path=self.path)
 
@@ -554,7 +541,7 @@ class HybridRegressor(Regressor):
 # Idea 1: Use Gaussian and Linear mix because linear performs quite well on the sides
 # but Gaussian performs quite well in the middle
 class GLH1Regression(HybridRegressor):
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         # Outer region size
         outer_size = self.region_size[0]
         inner_size = self.region_size[1]
@@ -596,7 +583,7 @@ class GLH1Regression(HybridRegressor):
 
 # Idea 1.1: Use the same linear model to predict the sides, and then also feed that data into the gaussian model
 class GLH2Regression(HybridRegressor):
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         outer_size = self.region_size[0]
         inner_size = self.region_size[1]
 
@@ -645,7 +632,7 @@ class GLH2Regression(HybridRegressor):
 
 # Idea 1.2: what if we feed the entire linear model into the Gaussian model and see what happens?
 class GLH3Regression(HybridRegressor):
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         outer_size = self.region_size[0]
         inner_size = self.region_size[1]
 
@@ -694,7 +681,7 @@ class GLH4Regression(Regressor):
     def __init__(self, use_first_n_for_linear = 5):
         self.linear_component_N = use_first_n_for_linear
 
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         N = self.linear_component_N
         if xtrain.shape[0] < N:
             raise RegressorFitError("Too few training data")
@@ -716,7 +703,6 @@ class GLH4Regression(Regressor):
         model.fit(xtrain, error)
 
         return (linear_component, model, norm)
-
 
     def predict(self, xtest):
         (lin, err, norm) = self.model
@@ -838,7 +824,7 @@ class TCEPRegression(Regressor):
         self.tcep = tcep
 
     # We do the training directly in fit_model so leave this unimplemented
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         raise NotImplementedError
 
     @property
@@ -936,7 +922,7 @@ class PolynomialRegression(Regressor):
         self.degree = degree
         self.interaction_only = interaction_only
 
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         poly = PolynomialFeatures(degree=self.degree, include_bias=False, interaction_only=self.interaction_only)
         lin = Linear()
 
@@ -1009,7 +995,7 @@ class LLH1Regression(MultipleRegressor):
     def __init__(self, variance = 1):
         self.variance = variance
     
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         # Define the optimization function
         def minimize_me(ob):
             m, a, b, c = ob
@@ -1027,7 +1013,7 @@ class LLH1Regression(MultipleRegressor):
     
     @property
     def model_name(self):
-        return "LLH1 Regression"
+        return "Linear Log Hybrid 1"
     
     @property
     def max_num_features(self):
@@ -1038,7 +1024,7 @@ class LLH2Regression(MultipleRegressor):
     def __init__(self, initial_voltage_guess = 30):
         self.initial_voltage_guess = initial_voltage_guess
     
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):
         # Define the optimization function
         def minimize_me(ob):
             m, a, b, c, v = ob
@@ -1056,7 +1042,7 @@ class LLH2Regression(MultipleRegressor):
     
     @property
     def model_name(self):
-        return "LLH2 Regression"
+        return "Linear Log Hybrid 2"
     
     @property
     def max_num_features(self):
@@ -1065,7 +1051,7 @@ class LLH2Regression(MultipleRegressor):
 # We get a = 30 b = 1 most most of the time anyway
 # How about fix a = 30? Also fix variance = 0 because seems like convolution is not doing much good
 class LLH3Regression(MultipleRegressor):
-    def fit(self, xtrain, ytrain):
+    def fit_data(self, xtrain, ytrain):        
         # Define the optimization function
         def minimize_me(ob):
             m, b, c = ob
@@ -1083,11 +1069,48 @@ class LLH3Regression(MultipleRegressor):
     
     @property
     def model_name(self):
-        return "LLH3 Regression"
+        return "Linear Log Hybrid 3"
     
     @property
     def max_num_features(self):
         return 1
+
+# Use linear for outer region but LLH3 for inner region
+class LLH4Regression(HybridRegressor):
+    # The implementation is almost identical to GLH1
+    def fit_data(self, xtrain, ytrain):
+        outer_size = self.region_size[0]
+        inner_size = self.region_size[1]
+
+        yt = ytrain.reshape((-1, 129, 17))
+        yleft = yt[:, :outer_size, :].reshape((-1, outer_size * 17))
+        ymiddle = yt[:, outer_size:-outer_size, :].reshape((-1, inner_size * 17))
+        yright = yt[:, -outer_size:, :].reshape((-1, outer_size * 17))
+
+        left_model = Linear().fit(xtrain, yleft)
+        right_model = Linear().fit(xtrain, yright)
+
+        model = LLH3Regression().fit(xtrain[:, 0:1], ymiddle)
+
+        return (left_model, model, right_model)
+
+    def predict(self, xtest):
+        outer_size = self.region_size[0]
+        inner_size = self.region_size[1]
+
+        l = self.model[0].predict(xtest).reshape((-1, outer_size, 17))
+        m = self.model[1].predict(xtest).reshape((-1, inner_size, 17))
+        r = self.model[2].predict(xtest).reshape((-1, outer_size, 17))
+
+        y = np.concatenate([l, m, r], axis = 1)
+
+        y = y.reshape((-1, 129*17))
+
+        return y
+
+    @property
+    def model_name(self):
+        return "Linear Log Hybrid 4"
 
 # Import antics
 __all__ = [
@@ -1114,5 +1137,6 @@ __all__ = [
     "PolynomialRegression",
     "LLH1Regression",
     "LLH2Regression",
-    "LLH3Regression"
+    "LLH3Regression",
+    "LLH4Regression",
 ]
