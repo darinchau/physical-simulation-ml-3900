@@ -5,3 +5,8 @@ model_*
 Datas/*
 Datas
 *.png
+
+
+# Added by cargo
+
+/target
