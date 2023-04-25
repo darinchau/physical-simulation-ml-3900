@@ -1111,6 +1111,13 @@ class LLH4Regression(HybridRegressor):
     @property
     def model_name(self):
         return "Linear Log Hybrid 4"
+    
+class LinearGradientRegressor(Regressor):
+    def fit_data(self, xtrain, ytrain):
+        vgap = 0.0075
+        ddy = (ytrain[0:-2] + ytrain[2:] - 2 * ytrain[1:-1]) / vgap / vgap
+        model = Linear().fit(xtrain[1:-1], ddy)
+
 
 # Import antics
 __all__ = [

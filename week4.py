@@ -241,31 +241,4 @@ def plot_data_2(model_name):
     d.show(show_log_plot = False)
 
 if __name__ == "__main__":
-    test_all_models([
-        LinearRegression(),
-        RidgeCVRegression(),
-        GaussianRegression(),
-        GLH1Regression(),
-        LLH1Regression(variance=0),
-        LLH1Regression(variance=0.1),
-        LLH1Regression(variance=1),
-        LLH2Regression(),
-        LLH3Regression(),
-        LLH4Regression(),
-    ], to_test = [
-        TrainingIndex("First 5", range(5)),
-        TrainingIndex("First 20", range(20)),
-        TrainingIndex("First 30", range(30)),
-        TrainingIndex("First 40", range(40)),
-        TrainingIndex("First 60", range(60)),
-        TrainingIndex("First 75", range(75)),
-        TrainingIndex("First 90", range(90)),
-        TrainingIndex("15 to 45", range(15, 45)),
-        TrainingIndex("20 to 40", range(20, 40)),
-        TrainingIndex("40 to 60", range(40, 60)),
-        TrainingIndex("25 to 35", range(25, 35)),
-        TrainingIndex("20 to 50", range(20, 50)),
-        TrainingIndex("30 to 50", range(30, 50)),
-        TrainingIndex("29 and 30 and 31", [29, 30, 31]),
-    ], sequential = True)
-
+    pass

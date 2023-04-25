@@ -20,11 +20,11 @@ FOLDER_NAME = "./Datas/Week 4"
 # We will still make all the animations regardless of this list
 RESULTS_TO_INCLUDE = [
     "First 5", 
-    # "First 20", 
-    # "First 40", 
-    # "First 90", 
-    # "20 to 40", 
-    # "40 to 60"
+    "First 20", 
+    "First 40", 
+    "First 90", 
+    "20 to 40", 
+    "40 to 60"
 ]
 
 def main():
