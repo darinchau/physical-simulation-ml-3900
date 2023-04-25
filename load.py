@@ -40,6 +40,13 @@ def load_spacing():
 def load_space_charge():
     return np.nan_to_num(SPACE_CHARGE, nan=0)
 
+# There is a zeros region somewhere in the e density. Cut that region
+def load_e_density_non_zero():
+    return load_e_density()[:, :, :11]
+
+def load_space_charge_non_zero():
+    return load_space_charge()[:, :, :11]
+
 def load_log_e_density():
     log_e_density = load_e_density()
     log_e_density[log_e_density < 1] = 1
@@ -357,7 +364,7 @@ class DataVisualizer:
     def add_data(self, data, name, thickness = 1.5):
         self.datas[name] = (np.array(data), thickness)
     
-    def show(self, show_log_plot = True):        
+    def show(self):        
         # Load the spacing
         x_spacing, y_spacing = load_spacing()
         x_grid, y_grid = np.meshgrid(x_spacing, y_spacing)
@@ -380,49 +387,36 @@ class DataVisualizer:
             # Find the index of the nearest spacing value
             row = np.abs(y - y_spacing).argmin()
             col = np.abs(x - x_spacing).argmin()
+
+            # Plot the values
+            fig, ax = plt.subplots(3, 1, gridspec_kw={'height_ratios': [6, 6, 1]})
+
+            # Get the values of the cell across all arrays
+            for k, (v, t) in self.datas.items():
+                values = v[:, col, row]
+                ax[0].plot(values, label = k, linewidth = t)
+                
+                if k == "Original":
+                    continue
+                
+                orig_v = self.datas["Original"][0][:, col, row]
+                ax[1].plot(np.abs(values - orig_v), label = k)
             
-            if show_log_plot:
-                # Plot the values
-                fig, ax = plt.subplots(3, 1, gridspec_kw={'height_ratios': [6, 6, 1]})
-
-                # Get the values of the cell across all arrays
-                for k, (v, t) in self.datas.items():
-                    values = v[:, col, row]
-                    ax[0].plot(values, label = k, linewidth = t)
-                    ax[1].plot(values, label = k, linewidth = t)
-                
-                ax[1].set_xlabel("Array index")
-                
-                ax[0].set_ylabel("Value")
-                ax[1].set_ylabel("Value")
-                
-                ax[0].legend()
-                ax[1].legend()
-                
-                ax[1].set_yscale('log')
-                
-                ax[2].text(0, 0.5, f"Cell ({row}, {col}), Position: x = {event.xdata}, y = {event.ydata}", ha="left", va="center", fontsize=9)
-                ax[2].set_axis_off()
-                
-                fig.tight_layout()
-                fig.show()
-            else:
-                # Plot the values
-                fig, ax = plt.subplots(2, 1, gridspec_kw={'height_ratios': [6, 1]})
-
-                # Get the values of the cell across all arrays
-                for k, (v, t) in self.datas.items():
-                    values = v[:, col, row]
-                    ax[0].plot(values, label = k, linewidth = t)
-                
-                ax[0].set_xlabel("Array index")
-                ax[0].set_ylabel("Value")
-                ax[0].legend()
-                ax[1].text(0, 0.5, f"Cell ({row}, {col}), Position: x = {event.xdata}, y = {event.ydata}", ha="left", va="center", fontsize=9)
-                ax[1].set_axis_off()
-                
-                fig.tight_layout()
-                fig.show()
+            ax[1].set_xlabel("Array index")
+            
+            ax[0].set_ylabel("Potential")
+            ax[1].set_ylabel("Log Error")
+            
+            ax[0].legend()
+            ax[1].legend()
+            
+            ax[1].set_yscale('log')
+            
+            ax[2].text(0, 0.5, f"Cell ({row}, {col}), Position: x = {event.xdata}, y = {event.ydata}", ha="left", va="center", fontsize=9)
+            ax[2].set_axis_off()
+            
+            fig.tight_layout()
+            fig.show()
 
         # Create the heatmap
         fig, ax = plt.subplots()

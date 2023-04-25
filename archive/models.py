@@ -1114,30 +1114,40 @@ class LLH4Regression(HybridRegressor):
 
 class LLH5Regression(Regressor):
     def fit_data(self, xtrain, ytrain):
-        poly = PolynomialFeatures(degree=2, include_bias=False)
         lin = Linear()
         
-        if xtrain.shape[1] == 2194:
-            vg = xtrain[:, :1]
-            a = xtrain.shape[0]
-            x = xtrain[:, 1:].reshape((a, 129, 17))[:, :, :11].reshape((a, -1))
-            xtrain = np.concatenate([vg, x], axis = 1)
-
-        xpoly = poly.fit_transform(xtrain)
-        ex = np.exp(xtrain)
-        xex = np.exp(xtrain) * xtrain
-        x2ex = np.exp(xtrain) * xtrain * xtrain
-        new_x_train = np.concatenate([xpoly, ex, xex, x2ex], axis = 1)
+        x = xtrain
         
-        lin.fit(new_x_train, ytrain)
+        if x.shape[1] == 2194:
+            vg = x[:, :1]
+            a = x.shape[0]
+            x = x[:, 1:].reshape((a, 129, 17))[:, :, :11].reshape((a, -1))
+            x = np.concatenate([vg, x], axis = 1)
+
+        poly = PolynomialFeatures(degree=2, include_bias=False)
+        xpoly = poly.fit_transform(x)
+        ex = np.exp(x)
+        xex = np.exp(x) * x
+        x2ex = np.exp(xpoly) * xpoly
+        new_x = np.concatenate([xpoly, ex, xex, x2ex], axis = 1)
+        
+        lin.fit(new_x, ytrain)
         return lin
 
     def predict(self, xtest):
+        x = xtest
+        
+        if x.shape[1] == 2194:
+            vg = x[:, :1]
+            a = x.shape[0]
+            x = x[:, 1:].reshape((a, 129, 17))[:, :, :11].reshape((a, -1))
+            x = np.concatenate([vg, x], axis = 1)
+
         poly = PolynomialFeatures(degree=2, include_bias=False)
-        xpoly = poly.fit_transform(xtest)
-        ex = np.exp(xtest)
-        xex = np.exp(xtest) * xtest
-        x2ex = np.exp(xtest) * xtest * xtest
+        xpoly = poly.fit_transform(x)
+        ex = np.exp(x)
+        xex = np.exp(x) * x
+        x2ex = np.exp(xpoly) * xpoly
         new_x = np.concatenate([xpoly, ex, xex, x2ex], axis = 1)
         
         return self.model.predict(new_x)
