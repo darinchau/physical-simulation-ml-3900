@@ -1,10 +1,8 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colorbar import Colorbar
-from matplotlib.colors import Normalize, LogNorm
+from matplotlib.colors import LogNorm
 from matplotlib import animation
-from math import ceil
 import subprocess
 from numpy.typing import NDArray
 import h5py
