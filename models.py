@@ -13,15 +13,23 @@ from torch import nn
 from torch.utils.data import TensorDataset, DataLoader
 import torch.optim as optim
 from models_base import TrainingError, Model, Dataset
+from torch import Tensor
 
 __all__ = (
-    "LinearModel"
+    "TrainingError",
+    "Model",
+    "Dataset",
+    "LinearModel",
 )
 
 ## For example this is how you can wrap around a linear model
 class LinearModel(Model):
-    def fit_logic(self, xtrain: Dataset, ytrain: Dataset):
-        self.model = LinearRegression().fit(xtrain, ytrain)
+    def fit_logic(self, xtrain: Tensor, ytrain: Tensor):
+        xt = xtrain.cpu().numpy()
+        yt = ytrain.cpu().numpy()
+        self.model = LinearRegression().fit(xt, yt)
     
-    def predict_logic(self, xtest: Dataset) -> Dataset:
-        return self.model.predict(xtest)
+    def predict_logic(self, xtest: Tensor) -> Tensor:
+        xt = xtest.cpu().numpy()
+        ypred = self.model.predict(xt)
+        return torch.as_tensor(ypred)

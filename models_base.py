@@ -8,6 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from abc import abstractmethod as virtual
 import torch
+from torch import Tensor
 
 # Filter all warnings
 import warnings
@@ -25,38 +26,59 @@ class TrainingError(Exception):
 
 class Dataset:
     """A wrapper for Numpy arrays/torch tensors for easy manipulation of cutting, slicing, etc"""
-    def __init__(self, data: NDArray):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.__data = torch.as_tensor(data).to(device).float()
+    def __init__(self, *datas: NDArray | Tensor):
+        # Check if the have the same first dimension
+        num_entries = tuple(tuple(x.shape)[0] for x in datas)
+        for i, entry in enumerate({num_entries[0]}):
+            if entry != num_entries[0]:
+                raise ValueError(f"Found datasets of different length at 0 ({num_entries[0]}) and {i} ({entry})")
+        
+        # Put all tensors in a list
+        self.__data = []
+        for data in datas:
+            if len(data.shape) == 1:
+                raise TrainingError(f"The data must have at least two dimensions, since one-dimensional tensors are ambiguous. Found tensor of shape {data.shape}")
+            self.__data.append(torch.as_tensor(data).float())
 
+    # Overload print
     def __repr__(self):
         return f"Dataset{self.shape}"
 
     @property
-    def data(self):
-        return self.__data  
+    def datas(self) -> list[Tensor]:
+        return self.__data
     
     # len is number of data
     def __len__(self):
-        return len(self.data)
+        return self.num_datas
     
     @property
     def shape(self):
-        return tuple(self.data.shape)
+        return (self.num_datas,) + tuple(tuple(data.shape)[1:] for data in self.datas)
     
     @property
     def num_features(self):
-        return self.to_tensor().shape[1]
+        checkmul = 0
+        for s in self.shape[1:]:
+            a = 1
+            for k in s:
+                a *= k
+            checkmul += a
+        return checkmul
+    
+    @property
+    def num_datas(self):
+        return len(self.datas[0])
     
     # This implementation is ergonomic but need to remember lol
     # Add is concatenation of datasets
-    # Sub is calculating error of datasets - absolute value of the difference
+    # Sub is calculating error of datasets: absolute value of the difference
     def __add__(self, other: Dataset):
         if not isinstance(other, Dataset):
             raise TypeError(f"Does not support Dataset + {type(other)}")
-        if len(self) != len(other):
-            raise NotImplementedError(f"Cannot add dataset of different length ({len(self)} + {len(other)})")
-        return ConcatenatedDataset(self.clone(), other.clone())
+        if self.num_datas != other.num_datas:
+            raise NotImplementedError(f"Cannot add dataset of different number of datas ({self.num_datas} + {other.num_datas})")
+        return Dataset(*self.clone().datas, *other.clone().datas)
     
     def __sub__(self, other: Dataset):
         if not isinstance(other, Dataset):
@@ -67,51 +89,51 @@ class Dataset:
         return Dataset(diff).wrap(self.shape)
     
     def clone(self) -> Dataset:
-        d = Dataset(torch.clone(self.data))
+        d = Dataset(*[torch.clone(data) for data in self.datas])
         return d
     
     # __iter__ automatically flattens everything and yield it as a 1D tensor
-    def to_tensor(self) -> torch.Tensor:
-        return self.data.reshape((len(self), -1))
+    def to_tensor(self) -> Tensor:
+        return torch.cat([d.reshape((self.num_datas, -1)) for d in self.datas], axis = 1)
     
-    def wrap(self, shape) -> Dataset:
+    def wrap_inplace(self, shape):
         """Wraps the dataset according to the given shape. Raises an error if the numbers does not match up"""
         ## Check the length
-        if shape[0] != len(self):
-            raise ValueError(f"The length of the shape does not match: (self: {len(self)}, shape: {shape[0]})")
+        if shape[0] != self.num_datas:
+            raise ValueError(f"The length of the shape does not match: (self: {self.num_datas}, shape: {shape[0]})")
+        
         ## Do the checksum first
-        checkmul = 0
+        check_features = 0
         for s in shape[1:]:
             a = 1
             for k in s:
                 a *= k
-            checkmul += a
-        orig = self.to_tensor()
-        num_samples = orig.shape[1]
+            check_features += a
 
-        if checkmul != orig.shape[1]:
-            raise ValueError(f"The shape does not match (self: {num_samples}, shape: {checkmul})")
+        if check_features != self.num_features:
+            raise ValueError(f"The shape does not match (self: {self.num_features}, shape: {check_features})")
+        
+        # Flatten oneself
+        orig = self.to_tensor()
 
         # Unwrap everything and rewrap
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         i = 0
-        datasets: list[Dataset] = []
+        self.__data = []
         for dims in shape[1:]:
             total = 1
             for k in dims:
                 total *= k
             newshape = (shape[0],) + dims
-            t = torch.tensor(orig[:, i:i+total]).reshape(newshape).to(device).float()
-            i += k
-            d = Dataset(t)
-            datasets.append(d)
-
-        # Add all datasets together
-        a0 = datasets[0] + datasets[1]
-        for b in datasets[2:]:
-            a0 = a0 + b
-
-        return a0
+            t = orig[:, i:i+total].view(newshape)
+            i += total
+            self.__data.append(t)
+    
+    def wrap(self, shape) -> Dataset:
+        """Wraps the dataset according to the given shape. Raises an error if the numbers does not match up.
+        This is a combination of the wrap_inplace method and clone method."""
+        d = self.clone()
+        d.wrap_inplace(shape)
+        return d
     
     @staticmethod
     def split(x: Dataset, y: Dataset, train_index: list[int]):
@@ -126,66 +148,41 @@ class Dataset:
         yflatten = y.to_tensor()
 
         include_data = list(set(train_index))
-        xtrain = Dataset(xflatten[include_data]).wrap(xshape)
-        ytrain = Dataset(yflatten[include_data]).wrap(yshape)
+        xtrain = Dataset(xflatten[include_data])
+        xtrain.wrap_inplace((len(include_data),) + xshape[1:])
+
+        ytrain = Dataset(yflatten[include_data])
+        ytrain.wrap_inplace((len(include_data),) + yshape[1:])
 
         exclude_data = list(set(range(len(x))) - set(train_index))
-        xtest = Dataset(xflatten[exclude_data]).wrap(xshape)
-        ytest = Dataset(yflatten[exclude_data]).wrap(yshape)
+        xtest = Dataset(xflatten[exclude_data])
+        xtest.wrap_inplace((len(exclude_data),) + xshape[1:])
+
+        ytest = Dataset(yflatten[exclude_data])
+        ytest.wrap_inplace((len(exclude_data),) + yshape[1:])
 
         return xtrain, ytrain, xtest, ytest
     
+    # Get a view of the nth dataset
     def __getitem__(self, i: int | slice | tuple[int | slice, ...]) -> Dataset:
-        data_slice = self.data[i]
+        data_slice = self.datas[i]
         d = Dataset(data_slice)
         return d
     
-    def unpack(self) -> list[Dataset]:
-        """Unpack the dataset into a list of elementary datasets i.e. not concatenated. On Dataset, it clones and wraps in a list which helps the implementation on ConcatenatedDataset using OOP magic"""
-        return [self.clone()]
-
-class ConcatenatedDataset(Dataset):
-    def __init__(self, data1: Dataset, data2: Dataset):
-        self.data1 = data1
-        self.data2 = data2
-    
-    @property
-    def shape(self):
-        if isinstance(self.data2, ConcatenatedDataset):
-            return (len(self.data1), self.data1.shape[1:], *self.data2.shape[1:])
-        return (len(self.data1), self.data1.shape[1:], self.data2.shape[1:])
-
-    def clone(self) -> ConcatenatedDataset:
-        return ConcatenatedDataset(self.data1.clone(), self.data2.clone())
-    
-    def __add__(self, other: Dataset):
-        return ConcatenatedDataset(self.data1, self.data2 + other)
-    
-    def __len__(self):
-        return len(self.data1)
-    
-    def to_tensor(self) -> torch.Tensor:
-        return torch.cat([self.data1.to_tensor(), self.data2.to_tensor()], axis = 1)
-    
-    def __getitem__(self, i: int | slice | tuple[int | slice, ...]) -> Dataset:
-        if isinstance(i, tuple):
-            ds = self[i[0]]
-            return ds[i[1:]]
-        return self.unpack()[i]
-
-    def unpack(self) -> list[Dataset]:
-        """Unpack the dataset into a list of elementary datasets i.e. not concatenated"""
-        return self.data1.unpack() + self.data2.unpack()
+    def to_device(self):
+        # Move everything to cuda if necessary
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.__data = [d.to(device) for d in self.datas]
 
 class Model:
     """Base class for all models. All models have a name, a fit method, and a predict method"""
     @virtual
-    def fit_logic(self, xtrain: torch.Tensor, ytrain: torch.Tensor):
+    def fit_logic(self, xtrain: Tensor, ytrain: Tensor):
         """The train logic of the model. Every model inherited from Model needs to implement this"""
         raise NotImplementedError
     
     @virtual
-    def predict_logic(self, xtest: torch.Tensor) -> torch.Tensor:
+    def predict_logic(self, xtest: Tensor) -> Tensor:
         """The prediction logic of the model. Every model inherited from Model needs to implement this"""
         raise NotImplementedError
     
@@ -219,7 +216,7 @@ class Model:
         yt = ytrain.to_tensor()
         if xt.shape[1] > self.max_num_features:
             raise TrainingError("Too many features")
-        self.fit(xt, yt)
+        self.fit_logic(xt, yt)
         self._ytrain_shape = ytrain.shape
         self._trained = True
     
@@ -227,7 +224,9 @@ class Model:
         """Use xtest to predict ytest"""
         if not self.trained:
             raise TrainingError("Model has not been trained")
-        ypred = Dataset(self.predict_logic(xtest)).wrap(self._ytrain_shape)
+        xt = xtest.to_tensor()
+        ypred = Dataset(self.predict_logic(xt))
+        ypred.wrap_inplace((len(xtest),) + self._ytrain_shape[1:])
         return ypred
 
     @property
