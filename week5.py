@@ -3,6 +3,7 @@ from models import *
 from load import *
 from typing import Iterable
 from dataclasses import dataclass
+import multiprocessing as mp
 
 # Root path to store all the data
 ROOT = "./Datas/Week 5"
@@ -31,10 +32,10 @@ def train(model: Model, training_idxs: list[TrainingIndex]):
         model.fit(xtrain, ytrain)
 
         # Test the model
-        ypred = model.predict(vg)
-        error = (ypred - potential).to_tensor().cpu().numpy().reshape(101, 129, 17)
+        ypred = model.predict(vg).to_tensor().cpu().numpy().reshape(101, 129, 17)
 
-        predictions[idxs.name] = np.array(error)
+        # Save the prediction
+        predictions[idxs.name] = np.array(ypred)
 
     return predictions
 
@@ -49,7 +50,34 @@ def test_model(model: Model, training_idxs: list[TrainingIndex]):
         f.write(model.logs)
 
     # Save predictions
-    save_h5(predictions, path)
+    save_h5(predictions, f"{path}/predictions.h5")
+
+# Test each model. If there is only one, then use sequential, otherwise parallel
+def test_all_models(models: list[Model], training_idxs: list[TrainingIndex]):
+    if len(models) == 1:
+        test_model(models[0], training_idxs)
+        return
+    
+    with mp.Pool(processes = 4) as pool:
+        pool.starmap(test_model, [(model, training_idxs) for model in models])
     
 if __name__ == "__main__":
-    train()
+    test_all_models([
+        LinearModel(),
+        GaussianModel(),
+    ], training_idxs = [
+        TrainingIndex("First 5", range(5)),
+        TrainingIndex("First 20", range(20)),
+        TrainingIndex("First 30", range(30)),
+        TrainingIndex("First 40", range(40)),
+        TrainingIndex("First 60", range(60)),
+        TrainingIndex("First 75", range(75)),
+        TrainingIndex("First 90", range(90)),
+        TrainingIndex("15 to 45", range(15, 45)),
+        TrainingIndex("20 to 40", range(20, 40)),
+        TrainingIndex("40 to 60", range(40, 60)),
+        TrainingIndex("25 to 35", range(25, 35)),
+        TrainingIndex("20 to 50", range(20, 50)),
+        TrainingIndex("30 to 50", range(30, 50)),
+        TrainingIndex("29 and 30 and 31", [29, 30, 31])
+    ])

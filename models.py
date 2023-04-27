@@ -4,10 +4,11 @@
 from __future__ import annotations
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF
 import numpy as np
 from numpy.typing import NDArray
 from abc import abstractmethod as virtual
-from load import index_exclude, index_include
 import torch
 from torch import nn
 from torch.utils.data import TensorDataset, DataLoader
@@ -20,6 +21,7 @@ __all__ = (
     "Model",
     "Dataset",
     "LinearModel",
+    "GaussianModel",
 )
 
 ## For example this is how you can wrap around a linear model
@@ -27,9 +29,23 @@ class LinearModel(Model):
     def fit_logic(self, xtrain: Tensor, ytrain: Tensor):
         xt = xtrain.cpu().numpy()
         yt = ytrain.cpu().numpy()
-        self.model = LinearRegression().fit(xt, yt)
+        self._model = LinearRegression().fit(xt, yt)
     
     def predict_logic(self, xtest: Tensor) -> Tensor:
         xt = xtest.cpu().numpy()
-        ypred = self.model.predict(xt)
+        ypred = self._model.predict(xt)
+        return torch.as_tensor(ypred)
+
+## Here is how you can wrap around the Gaussian prediction
+class GaussianModel(Model):
+    def fit_logic(self, xtrain: Tensor, ytrain: Tensor):
+        kernel = RBF(length_scale=1.0)
+        model = GaussianProcessRegressor(kernel=kernel, alpha=1e-5, n_restarts_optimizer=10)
+        xt = xtrain.cpu().numpy()
+        yt = ytrain.cpu().numpy()
+        self._model = model.fit(xt, yt)
+    
+    def predict_logic(self, xtest: Tensor) -> Tensor:
+        xt = xtest.cpu().numpy()
+        ypred = self._model.predict(xt)
         return torch.as_tensor(ypred)

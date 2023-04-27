@@ -165,7 +165,7 @@ class Dataset:
         return xtrain, ytrain, xtest, ytest
     
     # Get a view of the nth dataset
-    def __getitem__(self, i: int | slice | tuple[int | slice, ...]) -> Dataset:
+    def __getitem__(self, i: int | slice) -> Dataset:
         data_slice = self.datas[i]
         d = Dataset(data_slice)
         return d
@@ -205,6 +205,10 @@ class Model:
         w.append(s[k:])
         return ' '.join(w)
     
+    # Initialize the model
+    def __init__(self):
+        self._trained = False
+    
     @property
     def trained(self) -> bool:
         if not hasattr(self, "_trained"):
@@ -213,11 +217,16 @@ class Model:
     
     def fit(self, xtrain: Dataset, ytrain: Dataset):
         """Fit xtrain and ytrain on the model"""
+        self.__init__()
+        
         xt = xtrain.to_tensor()
         yt = ytrain.to_tensor()
+
         if xt.shape[1] > self.max_num_features:
             raise TrainingError("Too many features")
+        
         self.fit_logic(xt, yt)
+
         self._ytrain_shape = ytrain.shape
         self._xtrain_shape = xtrain.shape
         self._trained = True
@@ -234,11 +243,16 @@ class Model:
         xt = xtest.to_tensor()
         ypred = Dataset(self.predict_logic(xt))
 
-        if ypred.shape[1:] != self._ytrain_shape[1:]:
-            a = ("_",) + self._ytrain_shape[1:]
-            raise TrainingError(f"Expects ypred to have shape ({a}) from model training, but got ypred with shape {ypred.shape}")
+        # Sanity checks
+        if ypred.shape[0] != len(xtest):
+            raise TrainingError(f"There are different number of samples in xtest ({len(xtest)}) and ypred ({ypred.shape[0]})")
         
-        ypred.wrap_inplace((len(xtest),) + self._ytrain_shape[1:])
+        # Wrap back ypred in the correct shape
+        try:
+            ypred.wrap_inplace((len(xtest),) + self._ytrain_shape[1:])
+        except ValueError:
+            raise TrainingError(f"Expects ypred (shape: {ypred.shape}) and ytrain (shape: {self._ytrain_shape}) has the same number of features")
+        
         return ypred
 
     @property

@@ -4,17 +4,16 @@
 # for path in os.listdir("./Datas/Week 3"):
 #     make_plots(f"./Datas/Week 3/{path}")
 
-
 import os
-from load import make_plots
-from multiprocessing import Process
+from anim import make_plots
+from multiprocessing import Process, Pool
 
 # This suppresses the warnings when doing the log plots because theres gotta be a zero somewhere :)
 import warnings
 warnings.filterwarnings("ignore")
 
 # The folder that contains the generated data
-FOLDER_NAME = "./Datas/Week 4"
+FOLDER_NAME = "./Datas/Week 5"
 
 # The list of training results to include in the error plots
 # We will still make all the animations regardless of this list
@@ -28,14 +27,9 @@ RESULTS_TO_INCLUDE = [
 ]
 
 def main():
-    processes = []
-    for path in os.listdir(FOLDER_NAME):
-        p = Process(target=make_plots, args=(f"{FOLDER_NAME}/{path}", None, RESULTS_TO_INCLUDE))
-        p.start()
-        processes.append(p)
-
-    for p in processes:
-        p.join()
+    paths = [f"{FOLDER_NAME}/{path}" for path in os.listdir(FOLDER_NAME)]
+    with Pool(processes=8) as pool:
+        pool.starmap(make_plots, [(path, None, RESULTS_TO_INCLUDE) for path in paths])
 
 if __name__ == "__main__":
     main()
