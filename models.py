@@ -29,11 +29,11 @@ class LinearModel(Model):
     def fit_logic(self, xtrain: Tensor, ytrain: Tensor):
         xt = xtrain.cpu().numpy()
         yt = ytrain.cpu().numpy()
-        self._model = LinearRegression().fit(xt, yt)
+        return LinearRegression().fit(xt, yt)
     
-    def predict_logic(self, xtest: Tensor) -> Tensor:
+    def predict_logic(self, model, xtest: Tensor) -> Tensor:
         xt = xtest.cpu().numpy()
-        ypred = self._model.predict(xt)
+        ypred = model.predict(xt)
         return torch.as_tensor(ypred)
 
 ## Here is how you can wrap around the Gaussian prediction
@@ -43,9 +43,9 @@ class GaussianModel(Model):
         model = GaussianProcessRegressor(kernel=kernel, alpha=1e-5, n_restarts_optimizer=10)
         xt = xtrain.cpu().numpy()
         yt = ytrain.cpu().numpy()
-        self._model = model.fit(xt, yt)
+        return model.fit(xt, yt)
     
-    def predict_logic(self, xtest: Tensor) -> Tensor:
+    def predict_logic(self, model, xtest: Tensor) -> Tensor:
         xt = xtest.cpu().numpy()
-        ypred = self._model.predict(xt)
+        ypred = model.predict(xt)
         return torch.as_tensor(ypred)

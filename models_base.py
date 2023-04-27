@@ -1,14 +1,15 @@
-## This module contains code for physics-informed neural networks, motivated by the first 4 weeks of stuff in archive/models.py
-## But most implementations in the model.py file is a bit too complicated now, so we start over with a different code structure
+## This module contains code for base classes of models, motivated by the first 4 weeks of stuff in archive/models.py
+## But most implementations in the train.py file is a bit too complicated now, so we start over with a different code structure
 
 from __future__ import annotations
 from sklearn.linear_model import LinearRegression as Linear
 from sklearn.preprocessing import PolynomialFeatures
 import numpy as np
 from numpy.typing import NDArray
-from abc import abstractmethod as virtual
+from abc import abstractmethod as virtual, ABC
 import torch
 from torch import Tensor
+from typing import Any
 
 # Filter all warnings
 import warnings
@@ -21,7 +22,7 @@ __all__ = (
 )
 
 class TrainingError(Exception):
-    """Errors raised in the Models module"""
+    """Errors raised in the Models module which are recoverable and can be simply and safely skipped over."""
     pass
 
 class Dataset:
@@ -37,7 +38,7 @@ class Dataset:
         self.__data = []
         for data in datas:
             if len(data.shape) == 1:
-                raise TrainingError(f"The data must have at least two dimensions, since one-dimensional tensors are ambiguous. Found tensor of shape {data.shape}")
+                raise ValueError(f"The data must have at least two dimensions, since one-dimensional tensors are ambiguous. Found tensor of shape {data.shape}")
             self.__data.append(torch.as_tensor(data).float())
 
     # Overload print
@@ -139,7 +140,7 @@ class Dataset:
     def split(x: Dataset, y: Dataset, train_index: list[int]):
         """Performs train test split"""
         if len(x) != len(y):
-            raise TrainingError(f"Cannot split data because x ({len(x)}) and y ({len(y)}) has different length")
+            raise ValueError(f"Cannot split data because x ({len(x)}) and y ({len(y)}) has different length")
 
         xshape = x.shape
         yshape = y.shape
@@ -175,16 +176,18 @@ class Dataset:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.__data = [d.to(device) for d in self.datas]
 
-class Model:
+class Model(ABC):
     """Base class for all models. All models have a name, a fit method, and a predict method"""
     @virtual
-    def fit_logic(self, xtrain: Tensor, ytrain: Tensor):
-        """The train logic of the model. Every model inherited from Model needs to implement this"""
+    def fit_logic(self, xtrain: Tensor, ytrain: Tensor) -> Any:
+        """The train logic of the model. Every model inherited from Model needs to implement this
+        This needs to return the model, which will be passed in the predict_logic method as an argument"""
         raise NotImplementedError
     
     @virtual
-    def predict_logic(self, xtest: Tensor) -> Tensor:
-        """The prediction logic of the model. Every model inherited from Model needs to implement this"""
+    def predict_logic(self, model, xtest: Tensor) -> Tensor:
+        """The prediction logic of the model. Every model inherited from Model needs to implement this.
+        Takes in xtest and the model which will be exactly what the model has returned in fit_logic method"""
         raise NotImplementedError
     
     @property
@@ -215,6 +218,14 @@ class Model:
             return False
         return self._trained
     
+    # This is helpful for inheritance because we can only reimplement the inner logic of the fit
+    def _fit_inner(self, xt: Tensor, yt: Tensor) -> Any:
+        return self.fit_logic(xt, yt)
+    
+    # This is helpful for inheritance becausewe can only reimplement the inner logic of the prediction
+    def _predict_inner(self, model, xt: Tensor) -> Tensor:
+        return self.predict_logic(model, xt)
+    
     def fit(self, xtrain: Dataset, ytrain: Dataset):
         """Fit xtrain and ytrain on the model"""
         self.__init__()
@@ -222,43 +233,53 @@ class Model:
         xt = xtrain.to_tensor()
         yt = ytrain.to_tensor()
 
+        if xt.shape[0] < self.min_training_data:
+            raise TrainingError("Too few training data")
+
         if xt.shape[1] > self.max_num_features:
             raise TrainingError("Too many features")
         
-        self.fit_logic(xt, yt)
+        self._model = self._fit_inner(xt, yt)
 
         self._ytrain_shape = ytrain.shape
         self._xtrain_shape = xtrain.shape
         self._trained = True
     
+    # Predict inner logic + sanity checks
     def predict(self, xtest: Dataset) -> Dataset:
         """Use xtest to predict ytest"""
         if not self.trained:
-            raise TrainingError("Model has not been trained")
+            raise ValueError("Model has not been trained")
 
         if xtest.shape[1:] != self._xtrain_shape[1:]:
             a = ("_",) + self._xtrain_shape[1:]
-            raise TrainingError(f"Expects xtest to have shape ({a}) from model training, but got xtest with shape {xtest.shape}")
+            raise ValueError(f"Expects xtest to have shape ({a}) from model training, but got xtest with shape {xtest.shape}")
         
+        # Prediction
         xt = xtest.to_tensor()
-        ypred = Dataset(self.predict_logic(xt))
+        ypred = Dataset(self._predict_inner(self._model, xt))
 
         # Sanity checks
         if ypred.shape[0] != len(xtest):
-            raise TrainingError(f"There are different number of samples in xtest ({len(xtest)}) and ypred ({ypred.shape[0]})")
+            raise ValueError(f"There are different number of samples in xtest ({len(xtest)}) and ypred ({ypred.shape[0]})")
         
         # Wrap back ypred in the correct shape
         try:
             ypred.wrap_inplace((len(xtest),) + self._ytrain_shape[1:])
         except ValueError:
-            raise TrainingError(f"Expects ypred (shape: {ypred.shape}) and ytrain (shape: {self._ytrain_shape}) has the same number of features")
+            raise ValueError(f"Expects ypred (shape: {ypred.shape}) and ytrain (shape: {self._ytrain_shape}) has the same number of features")
         
         return ypred
 
     @property
     def max_num_features(self) -> int:
-        """The max number of features of the model. This is useful when we want to constrain the number of parameters"""
-        return 9999
+        """The max number of features of the model. This is useful when we want to constrain the number of parameters. Default is 3 million"""
+        return 3000000
+    
+    @property
+    def min_training_data(self) -> int:
+        """The minimum number of training data required for the model. Default is 1"""
+        return 1
     
     @property
     def model_structure(self) -> str:
@@ -274,6 +295,23 @@ class Model:
     def logs(self) -> str:
         """Return a unique string that identifies a particular setup of a model"""
         return f"{self.name}\n\n{self.model_structure}"
+
+class MultiModel(Model):
+    """A subclass of model where y is guaranteed to have one feature only in the implementation.
+    This assumes every feature is independent and thus we can predict each model separately"""
+    def _fit_inner(self, xt: Tensor, yt: Tensor) -> Any:
+        num_tasks = yt.shape[1]
+        models = [None] * num_tasks
+        for i in range(num_tasks):
+            models[i] = self.fit_logic(xt, yt[:, i])
+        return models
+    
+    def _predict_inner(self, model, xt: Tensor) -> Tensor:
+        num_tasks = len(model)
+        yp = torch.zeros(xt.shape[0], num_tasks)
+        for i in range(num_tasks):
+            yp[:, i] = self.predict_logic(model[i], xt)
+        return yp
 
 # Tests
 def test():
