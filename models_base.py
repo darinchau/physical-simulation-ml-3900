@@ -94,7 +94,7 @@ class Dataset:
     
     # __iter__ automatically flattens everything and yield it as a 1D tensor
     def to_tensor(self) -> Tensor:
-        return torch.cat([d.reshape((self.num_datas, -1)) for d in self.datas], axis = 1)
+        return torch.cat([d.reshape(self.num_datas, -1) for d in self.datas], axis = 1)
     
     def wrap_inplace(self, shape):
         """Wraps the dataset according to the given shape. Raises an error if the numbers does not match up"""
@@ -144,6 +144,7 @@ class Dataset:
         xshape = x.shape
         yshape = y.shape
 
+        # This creates copies already so don't worry
         xflatten = x.to_tensor()
         yflatten = y.to_tensor()
 
@@ -187,7 +188,7 @@ class Model:
         raise NotImplementedError
     
     @property
-    def model_name(self) -> str:
+    def name(self) -> str:
         """Returns the model name according to the class name."""
         s = self.__class__.__name__
         # Convert the class name from camel case to words
@@ -218,21 +219,47 @@ class Model:
             raise TrainingError("Too many features")
         self.fit_logic(xt, yt)
         self._ytrain_shape = ytrain.shape
+        self._xtrain_shape = xtrain.shape
         self._trained = True
     
     def predict(self, xtest: Dataset) -> Dataset:
         """Use xtest to predict ytest"""
         if not self.trained:
             raise TrainingError("Model has not been trained")
+
+        if xtest.shape[1:] != self._xtrain_shape[1:]:
+            a = ("_",) + self._xtrain_shape[1:]
+            raise TrainingError(f"Expects xtest to have shape ({a}) from model training, but got xtest with shape {xtest.shape}")
+        
         xt = xtest.to_tensor()
         ypred = Dataset(self.predict_logic(xt))
+
+        if ypred.shape[1:] != self._ytrain_shape[1:]:
+            a = ("_",) + self._ytrain_shape[1:]
+            raise TrainingError(f"Expects ypred to have shape ({a}) from model training, but got ypred with shape {ypred.shape}")
+        
         ypred.wrap_inplace((len(xtest),) + self._ytrain_shape[1:])
         return ypred
 
     @property
-    def max_num_features(self):
+    def max_num_features(self) -> int:
         """The max number of features of the model. This is useful when we want to constrain the number of parameters"""
         return 9999
+    
+    @property
+    def model_structure(self) -> str:
+        """The model structure. Default is all the non-hidden properties of the class."""
+        st = ""
+        for k, v in self.__dict__.items():
+            if k[0] == "_":
+                continue
+            st += f"\n{k} = {str(v)}"
+        return st.strip()
+    
+    @property
+    def logs(self) -> str:
+        """Return a unique string that identifies a particular setup of a model"""
+        return f"{self.name}\n\n{self.model_structure}"
 
 # Tests
 def test():
@@ -244,15 +271,15 @@ def test():
 
     dc = da + db
 
-    assert da.shape == (4, 4)
-    assert db.shape == (4, 3)
+    assert da.shape == (4, (4,))
+    assert db.shape == (4, (3,))
     assert dc.shape == (4, (4,), (3,))
     assert dc.to_tensor().shape == (4, 7)
 
     d = np.arange(4199).reshape((13, 17, 19))
     dd = Dataset(d)
 
-    assert dd.shape == (13, 17, 19)
+    assert dd.shape == (13, (17, 19))
     assert dd.to_tensor().shape == (13, 17 * 19)
 
     try:
@@ -277,6 +304,8 @@ def test():
         raise AssertionError("Should not be able to rewrap dg")
     except ValueError:
         pass
+
+    print("Tests passed")
 
 if __name__ == "__main__":
     test()
