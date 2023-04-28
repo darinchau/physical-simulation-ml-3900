@@ -13,6 +13,8 @@ from typing import Any
 
 # Filter all warnings
 import warnings
+
+from models_base import Dataset
 warnings.filterwarnings('ignore')
 
 __all__ = (
@@ -165,11 +167,11 @@ class Dataset:
 
         return xtrain, ytrain, xtest, ytest
     
-    # Get a view of the nth dataset
+    # Gets the n data of each dataset. Does not create a clone
     def __getitem__(self, i: int | slice) -> Dataset:
-        data_slice = self.datas[i]
-        d = Dataset(data_slice)
-        return d
+        new_datas = [d[i] for d in self.datas]
+        dataset = Dataset(*new_datas)
+        return dataset
     
     def to_device(self):
         # Move everything to cuda if necessary
@@ -219,27 +221,27 @@ class Model(ABC):
         return self._trained
     
     # This is helpful for inheritance because we can only reimplement the inner logic of the fit
-    def _fit_inner(self, xt: Tensor, yt: Tensor) -> Any:
+    def _fit_inner(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        xt = xtrain.to_tensor()
+        yt = ytrain.to_tensor()
         return self.fit_logic(xt, yt)
     
     # This is helpful for inheritance becausewe can only reimplement the inner logic of the prediction
-    def _predict_inner(self, model, xt: Tensor) -> Tensor:
-        return self.predict_logic(model, xt)
+    def _predict_inner(self, model, xtest: Dataset) -> Dataset:
+        xt = xtest.to_tensor()
+        return Dataset(self.predict_logic(model, xt))
     
     def fit(self, xtrain: Dataset, ytrain: Dataset):
         """Fit xtrain and ytrain on the model"""
         self.__init__()
-        
-        xt = xtrain.to_tensor()
-        yt = ytrain.to_tensor()
 
-        if xt.shape[0] < self.min_training_data:
+        if xtrain.num_datas < self.min_training_data:
             raise TrainingError("Too few training data")
 
-        if xt.shape[1] > self.max_num_features:
+        if xtrain.num_features > self.max_num_features:
             raise TrainingError("Too many features")
         
-        self._model = self._fit_inner(xt, yt)
+        self._model = self._fit_inner(xtrain, ytrain)
 
         self._ytrain_shape = ytrain.shape
         self._xtrain_shape = xtrain.shape
@@ -256,8 +258,7 @@ class Model(ABC):
             raise ValueError(f"Expects xtest to have shape ({a}) from model training, but got xtest with shape {xtest.shape}")
         
         # Prediction
-        xt = xtest.to_tensor()
-        ypred = Dataset(self._predict_inner(self._model, xt))
+        ypred = self._predict_inner(self._model, xtest)
 
         # Sanity checks
         if ypred.shape[0] != len(xtest):
@@ -299,19 +300,46 @@ class Model(ABC):
 class MultiModel(Model):
     """A subclass of model where y is guaranteed to have one feature only in the implementation.
     This assumes every feature is independent and thus we can predict each model separately"""
-    def _fit_inner(self, xt: Tensor, yt: Tensor) -> Any:
+    def _fit_inner(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        xt = xtrain.to_tensor()
+        yt = ytrain.to_tensor()
         num_tasks = yt.shape[1]
         models = [None] * num_tasks
         for i in range(num_tasks):
             models[i] = self.fit_logic(xt, yt[:, i])
         return models
     
-    def _predict_inner(self, model, xt: Tensor) -> Tensor:
+    def _predict_inner(self, model, xtest: Dataset) -> Dataset:
+        xt = xtest.to_tensor()
         num_tasks = len(model)
         yp = torch.zeros(xt.shape[0], num_tasks)
         for i in range(num_tasks):
             yp[:, i] = self.predict_logic(model[i], xt)
         return yp
+    
+class RecurrentModel(Model):
+    def __init__(self, use_last_n: int = 5):
+        super().__init__()
+        self.use_last_n = use_last_n
+
+    @property
+    def min_training_data(self) -> int:
+        return self.use_last_n + 1
+
+    def _fit_inner(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        # Adjoin the last n ytrain to xtrain
+        N = self.use_last_n
+        new_x = xtrain[N:]
+        for i in range(1, N+1):
+            new_x = new_x + ytrain[N-i:-i]
+        xt = new_x.to_tensor()
+        yt = ytrain.to_tensor()
+        model = self.fit_logic(xt, yt)
+        return model
+    
+    def _predict_inner(self, model, xtest: Dataset) -> Dataset:
+        pass
+        
 
 # Tests
 def test():
