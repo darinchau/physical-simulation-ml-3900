@@ -13,8 +13,6 @@ from typing import Any
 
 # Filter all warnings
 import warnings
-
-from models_base import Dataset
 warnings.filterwarnings('ignore')
 
 __all__ = (
@@ -316,30 +314,6 @@ class MultiModel(Model):
         for i in range(num_tasks):
             yp[:, i] = self.predict_logic(model[i], xt)
         return yp
-    
-class RecurrentModel(Model):
-    def __init__(self, use_last_n: int = 5):
-        super().__init__()
-        self.use_last_n = use_last_n
-
-    @property
-    def min_training_data(self) -> int:
-        return self.use_last_n + 1
-
-    def _fit_inner(self, xtrain: Dataset, ytrain: Dataset) -> Any:
-        # Adjoin the last n ytrain to xtrain
-        N = self.use_last_n
-        new_x = xtrain[N:]
-        for i in range(1, N+1):
-            new_x = new_x + ytrain[N-i:-i]
-        xt = new_x.to_tensor()
-        yt = ytrain.to_tensor()
-        model = self.fit_logic(xt, yt)
-        return model
-    
-    def _predict_inner(self, model, xtest: Dataset) -> Dataset:
-        pass
-        
 
 # Tests
 def test():

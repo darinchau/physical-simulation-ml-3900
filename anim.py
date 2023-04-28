@@ -280,7 +280,7 @@ def visualize_data(path: str, include_keys: list[str] | None = None):
                 continue
             d.add_data(f[key]["data"][:], key)
     
-    d.add_data(load_elec_potential(), "Original")
+    d.add_data(load_elec_potential(), "Original", thickness=3)
     d.show()
 
 class DataVisualizer:

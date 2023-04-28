@@ -2,6 +2,7 @@
 ## But most implementations in the model.py file is a bit too complicated now, so we start over with a different code structure
 
 from __future__ import annotations
+from typing import Any
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.gaussian_process import GaussianProcessRegressor
@@ -49,3 +50,4 @@ class GaussianModel(Model):
         xt = xtest.cpu().numpy()
         ypred = model.predict(xt)
         return torch.as_tensor(ypred)
+

@@ -1,6 +1,7 @@
 import numpy as np
 from models import *
 from load import *
+from anim import visualize_data
 from typing import Iterable
 from dataclasses import dataclass
 import multiprocessing as mp
@@ -62,22 +63,24 @@ def test_all_models(models: list[Model], training_idxs: list[TrainingIndex]):
         pool.starmap(test_model, [(model, training_idxs) for model in models])
     
 if __name__ == "__main__":
-    test_all_models([
-        LinearModel(),
-        GaussianModel(),
-    ], training_idxs = [
-        TrainingIndex("First 5", range(5)),
-        TrainingIndex("First 20", range(20)),
-        TrainingIndex("First 30", range(30)),
-        TrainingIndex("First 40", range(40)),
-        TrainingIndex("First 60", range(60)),
-        TrainingIndex("First 75", range(75)),
-        TrainingIndex("First 90", range(90)),
-        TrainingIndex("15 to 45", range(15, 45)),
-        TrainingIndex("20 to 40", range(20, 40)),
-        TrainingIndex("40 to 60", range(40, 60)),
-        TrainingIndex("25 to 35", range(25, 35)),
-        TrainingIndex("20 to 50", range(20, 50)),
-        TrainingIndex("30 to 50", range(30, 50)),
-        TrainingIndex("29 and 30 and 31", [29, 30, 31])
-    ])
+    # test_all_models([
+    #     LinearModel(),
+    #     GaussianModel(),
+    # ], training_idxs = [
+    #     TrainingIndex("First 5", range(5)),
+    #     TrainingIndex("First 20", range(20)),
+    #     TrainingIndex("First 30", range(30)),
+    #     TrainingIndex("First 40", range(40)),
+    #     TrainingIndex("First 60", range(60)),
+    #     TrainingIndex("First 75", range(75)),
+    #     TrainingIndex("First 90", range(90)),
+    #     TrainingIndex("15 to 45", range(15, 45)),
+    #     TrainingIndex("20 to 40", range(20, 40)),
+    #     TrainingIndex("40 to 60", range(40, 60)),
+    #     TrainingIndex("25 to 35", range(25, 35)),
+    #     TrainingIndex("20 to 50", range(20, 50)),
+    #     TrainingIndex("30 to 50", range(30, 50)),
+    #     TrainingIndex("29 and 30 and 31", [29, 30, 31])
+    # ])
+
+    visualize_data(f"{ROOT}/Gaussian Model", ["First 5", "First 20", "20 to 40", "40 to 60"])
