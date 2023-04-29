@@ -8,8 +8,9 @@ import numpy as np
 from numpy.typing import NDArray
 from abc import abstractmethod as virtual, ABC
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 from typing import Any
+import matplotlib.pyplot as plt
 
 # Filter all warnings
 import warnings
@@ -18,7 +19,9 @@ warnings.filterwarnings('ignore')
 __all__ = (
     "TrainingError",
     "Dataset",
-    "Model"
+    "Model",
+    "MultiModel",
+    "History"
 )
 
 class TrainingError(Exception):
@@ -136,33 +139,27 @@ class Dataset:
         d.wrap_inplace(shape)
         return d
     
+    def split_at(self, idxs: list[int]):
+        """Extracts the dataset at the specified indices."""
+        shape = self.shape
+        flatten = self.to_tensor()
+        include_data = list(set(idxs))
+        data = Dataset(flatten[include_data])
+        data.wrap_inplace((len(include_data),) + shape[1:])
+
+        exclude_data = list(set(range(len(self))) - set(idxs))
+        excl_data = Dataset(flatten[exclude_data])
+        excl_data.wrap_inplace((len(exclude_data),) + shape[1:])
+        return data, excl_data
+
     @staticmethod
     def split(x: Dataset, y: Dataset, train_index: list[int]):
         """Performs train test split"""
         if len(x) != len(y):
             raise ValueError(f"Cannot split data because x ({len(x)}) and y ({len(y)}) has different length")
 
-        xshape = x.shape
-        yshape = y.shape
-
-        # This creates copies already so don't worry
-        xflatten = x.to_tensor()
-        yflatten = y.to_tensor()
-
-        include_data = list(set(train_index))
-        xtrain = Dataset(xflatten[include_data])
-        xtrain.wrap_inplace((len(include_data),) + xshape[1:])
-
-        ytrain = Dataset(yflatten[include_data])
-        ytrain.wrap_inplace((len(include_data),) + yshape[1:])
-
-        exclude_data = list(set(range(len(x))) - set(train_index))
-        xtest = Dataset(xflatten[exclude_data])
-        xtest.wrap_inplace((len(exclude_data),) + xshape[1:])
-
-        ytest = Dataset(yflatten[exclude_data])
-        ytest.wrap_inplace((len(exclude_data),) + yshape[1:])
-
+        xtrain, xtest = x.split_at(train_index)
+        ytrain, ytest = y.split_at(train_index)
         return xtrain, ytrain, xtest, ytest
     
     # Gets the n data of each dataset. Does not create a clone
@@ -170,22 +167,30 @@ class Dataset:
         new_datas = [d[i] for d in self.datas]
         dataset = Dataset(*new_datas)
         return dataset
-    
-    def to_device(self):
-        # Move everything to cuda if necessary
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.__data = [d.to(device) for d in self.datas]
+
+    # Methods to augment dataset
+    def square(self):
+        """Creates a new dataset with squared features."""
+        poly = PolynomialFeatures(2)
+        new_data = poly.fit_transform(self.to_tensor().cpu().numpy())
+        new_t = torch.tensor(new_data)
+        return Dataset(new_t)
+
+    def exp(self):
+        """Creates a new dataset with all the features taken exponents"""
+        new_datas = [torch.exp(d) for d in self.datas]
+        return Dataset(*new_datas)
 
 class Model(ABC):
     """Base class for all models. All models have a name, a fit method, and a predict method"""
     @virtual
-    def fit_logic(self, xtrain: Tensor, ytrain: Tensor) -> Any:
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
         """The train logic of the model. Every model inherited from Model needs to implement this
         This needs to return the model, which will be passed in the predict_logic method as an argument"""
         raise NotImplementedError
     
     @virtual
-    def predict_logic(self, model, xtest: Tensor) -> Tensor:
+    def predict_logic(self, model, xtest: Dataset) -> Dataset:
         """The prediction logic of the model. Every model inherited from Model needs to implement this.
         Takes in xtest and the model which will be exactly what the model has returned in fit_logic method"""
         raise NotImplementedError
@@ -208,9 +213,10 @@ class Model(ABC):
         w.append(s[k:])
         return ' '.join(w)
     
-    # Initialize the model
-    def __init__(self):
+    def refresh(self):
+        """Refresh the model for a new training"""
         self._trained = False
+        self._informed = {}
     
     @property
     def trained(self) -> bool:
@@ -218,21 +224,29 @@ class Model(ABC):
             return False
         return self._trained
     
+    @property
+    def informed(self) -> dict[str, Dataset]:
+        if hasattr(self, "_testing") and self._testing:
+            raise ValueError("Model tried to access informed data during testing phase which is not permitted")
+        if not hasattr(self, "_informed"):
+            self._informed = {}
+        return self._informed
+    
+    def inform(self, info: Dataset, name: str):
+        """Informs the model about a certain information. Whether the model uses it depends on the implementation
+        This informed stuff will only be available during training and not during testing"""
+        self.informed[name] = info 
+    
     # This is helpful for inheritance because we can only reimplement the inner logic of the fit
     def _fit_inner(self, xtrain: Dataset, ytrain: Dataset) -> Any:
-        xt = xtrain.to_tensor()
-        yt = ytrain.to_tensor()
-        return self.fit_logic(xt, yt)
+        return self.fit_logic(xtrain, ytrain)
     
     # This is helpful for inheritance becausewe can only reimplement the inner logic of the prediction
     def _predict_inner(self, model, xtest: Dataset) -> Dataset:
-        xt = xtest.to_tensor()
-        return Dataset(self.predict_logic(model, xt))
+        return self.predict_logic(model, xtest)
     
     def fit(self, xtrain: Dataset, ytrain: Dataset):
         """Fit xtrain and ytrain on the model"""
-        self.__init__()
-
         if xtrain.num_datas < self.min_training_data:
             raise TrainingError("Too few training data")
 
@@ -244,10 +258,11 @@ class Model(ABC):
         self._ytrain_shape = ytrain.shape
         self._xtrain_shape = xtrain.shape
         self._trained = True
+        return self
     
     # Predict inner logic + sanity checks
     def predict(self, xtest: Dataset) -> Dataset:
-        """Use xtest to predict ytest"""
+        """Use xtest to predict ytest"""        
         if not self.trained:
             raise ValueError("Model has not been trained")
 
@@ -256,7 +271,9 @@ class Model(ABC):
             raise ValueError(f"Expects xtest to have shape ({a}) from model training, but got xtest with shape {xtest.shape}")
         
         # Prediction
+        self._testing = True
         ypred = self._predict_inner(self._model, xtest)
+        self._testing = False
 
         # Sanity checks
         if ypred.shape[0] != len(xtest):
@@ -269,6 +286,10 @@ class Model(ABC):
             raise ValueError(f"Expects ypred (shape: {ypred.shape}) and ytrain (shape: {self._ytrain_shape}) has the same number of features")
         
         return ypred
+    
+    def save_model(self, root: str):
+        """Overload this if you want to save your models in the folder 'root'"""
+        pass
 
     @property
     def max_num_features(self) -> int:
@@ -314,6 +335,35 @@ class MultiModel(Model):
         for i in range(num_tasks):
             yp[:, i] = self.predict_logic(model[i], xt)
         return yp
+    
+class History:
+    """A helper class to plot the history of training"""
+    def __init__(self):
+        self.datas = {
+            'trainy': [],
+            'trainx': [],
+            'testx': [],
+            'testy': [],
+        }
+        self.epochs = 0
+
+    def train(self, loss):
+        self.epochs += 1
+        self.datas['trainx'].append(self.epochs)
+        self.datas['trainy'].append(float(loss))
+
+    def test(self, loss):
+        self.datas['testx'].append(self.epochs)
+        self.datas['testy'].append(float(loss))
+
+    def plot(self, root: str, name: str):
+        fig, ax = plt.subplots()
+        ax.plot(self.datas['trainx'], self.datas['trainy'])
+        ax.plot(self.datas['testx'], self.datas['testy'])
+        ax.set_yscale('log')
+        ax.legend(['Train Error', 'Test Error'])
+        ax.set_title(f"Train/Test Error plot")
+        fig.savefig(f"{root}/{name} training loss.png")
 
 # Tests
 def test():
