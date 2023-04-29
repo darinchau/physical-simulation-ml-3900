@@ -287,7 +287,7 @@ class Model(ABC):
         
         return ypred
     
-    def save_model(self, root: str):
+    def save(self, root: str):
         """Overload this if you want to save your models in the folder 'root'"""
         pass
 
@@ -339,29 +339,44 @@ class MultiModel(Model):
 class History:
     """A helper class to plot the history of training"""
     def __init__(self):
-        self.datas = {
-            'trainy': [],
-            'trainx': [],
-            'testx': [],
-            'testy': [],
-        }
+        self.train_datas: dict[str, list] = {}
+        self.test_datas: dict[str, list] = {}
         self.epochs = 0
+        self.names: set[str] = set()
 
-    def train(self, loss):
+    def train(self, loss, name: str):
+        if name not in self.names:
+            self.names.add(name)
+            self.train_datas[name + 'x'] = []
+            self.train_datas[name + 'y'] = []
+            self.test_datas[name + 'x'] = []
+            self.test_datas[name + 'y'] = []
+        
+        self.train_datas[name + 'x'].append(self.epochs)
+        self.train_datas[name + 'y'].append(loss)
+
+    def test(self, loss, name: str):
+        if name not in self.names:
+            self.names.add(name)
+            self.train_datas[name + 'x'] = []
+            self.train_datas[name + 'y'] = []
+            self.test_datas[name + 'x'] = []
+            self.test_datas[name + 'y'] = []
+
+        self.test_datas[name + 'x'].append(self.epochs)
+        self.test_datas[name + 'y'].append(loss)
+
+    def update(self):
         self.epochs += 1
-        self.datas['trainx'].append(self.epochs)
-        self.datas['trainy'].append(float(loss))
-
-    def test(self, loss):
-        self.datas['testx'].append(self.epochs)
-        self.datas['testy'].append(float(loss))
 
     def plot(self, root: str, name: str):
         fig, ax = plt.subplots()
-        ax.plot(self.datas['trainx'], self.datas['trainy'])
-        ax.plot(self.datas['testx'], self.datas['testy'])
+        for name in self.names:
+            ax.plot(self.train_datas[name + 'x'], self.train_datas[name + 'y'], label = "Training " + name)
+            ax.plot(self.test_datas[name + 'x'], self.test_datas[name + 'y'], label = "Test " + name)
+
         ax.set_yscale('log')
-        ax.legend(['Train Error', 'Test Error'])
+        ax.legend()
         ax.set_title(f"Train/Test Error plot")
         fig.savefig(f"{root}/{name} training loss.png")
 

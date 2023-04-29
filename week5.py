@@ -1,10 +1,10 @@
 import numpy as np
 from models import *
 from load import *
-from anim import visualize_data
-from typing import Iterable
 from dataclasses import dataclass
 import multiprocessing as mp
+import torch
+from anim import AnimationMaker
 
 # Root path to store all the data
 ROOT = "./Datas/Week 5"
@@ -19,11 +19,11 @@ class TrainingIndex:
         return iter(self.indices)
 
 # Trains a model
-def train(model: Model, training_idxs: list[TrainingIndex]):
+def train(model: Model, training_idxs: list[TrainingIndex], root: str):
     vg = Dataset(np.arange(101).reshape(101, 1) / 100 * 0.0075)
     potential = Dataset(load_elec_potential())
-    edensity = Dataset(load_e_density_non_zero())
-    space_charge = Dataset(load_space_charge_non_zero())
+    edensity = Dataset(load_e_density())
+    space_charge = Dataset(load_space_charge())
 
     predictions = {}
     
@@ -46,7 +46,10 @@ def train(model: Model, training_idxs: list[TrainingIndex]):
         model.inform(ytest, "ytest")
 
         # Train the model
-        model.fit(xtrain, ytrain)
+        try:
+            model.fit(xtrain, ytrain)
+        except TrainingError as e:
+            continue
 
         # Test the model
         ypred = model.predict(vg).to_tensor().cpu().numpy().reshape(101, 129, 17)
@@ -54,15 +57,20 @@ def train(model: Model, training_idxs: list[TrainingIndex]):
         # Save the prediction
         predictions[idxs.name] = np.array(ypred)
 
+        # Save the model
+        model.save(root)
+
     return predictions
 
 # Puts a model to the test with the given training indices
 def test_model(model: Model, training_idxs: list[TrainingIndex]):
+    # Create folder
+    path = get_folder_directory(ROOT, model)
+
     # Train the model
-    predictions = train(model, training_idxs)
+    predictions = train(model, training_idxs, path)
 
     # Create logs
-    path = get_folder_directory(ROOT, model)
     with open(f"{path}/logs.txt", "w", encoding="utf-8") as f:
         f.write(model.logs)
 
@@ -70,18 +78,8 @@ def test_model(model: Model, training_idxs: list[TrainingIndex]):
     save_h5(predictions, f"{path}/predictions.h5")
 
 # Test each model. If there is only one, then use sequential, otherwise parallel
-def test_all_models(models: list[Model], training_idxs: list[TrainingIndex]):
-    if len(models) == 1:
-        test_model(models[0], training_idxs)
-        return
-    
-    with mp.Pool(processes = 4) as pool:
-        pool.starmap(test_model, [(model, training_idxs) for model in models])
-    
-if __name__ == "__main__":
-    test_all_models([
-        PoissonNNModel(),
-    ], training_idxs = [
+def test_all_models(models: list[Model]):
+    training_idxs = [
         TrainingIndex("First 5", range(5)),
         TrainingIndex("First 20", range(20)),
         TrainingIndex("First 30", range(30)),
@@ -96,5 +94,48 @@ if __name__ == "__main__":
         TrainingIndex("20 to 50", range(20, 50)),
         TrainingIndex("30 to 50", range(30, 50)),
         TrainingIndex("29 and 30 and 31", [29, 30, 31])
-    ])
-    pass
+    ]
+
+    if len(models) == 1:
+        test_model(models[0], training_idxs)
+        return
+    
+    with mp.Pool(processes = 4) as pool:
+        pool.starmap(test_model, [(model, training_idxs) for model in models])
+
+def derivative_plot():
+    # Elementary charge and dielectric constant of silicon
+    q = 1.6e-19
+    esi = 12
+
+    meshes = torch.tensor(load_elec_potential())
+    x = torch.tensor(load_spacing()[0])
+    y = torch.tensor(load_spacing()[1])
+    sc = load_space_charge() * (-q) / esi
+
+    dx = np.zeros((101, 129, 17))
+    dy = np.zeros((101, 129, 17))
+    laplace = np.zeros((101, 129, 17))
+
+    for i, mesh in enumerate(meshes):
+        dPdx = torch.gradient(mesh, spacing = (x,), dim = 0, edge_order = 2)[0]
+        dx[i] = dPdx.cpu().numpy()
+
+        dPdy = torch.gradient(mesh, spacing = (y,), dim = 1, edge_order = 2)[0]
+        dy[i] = dPdy.cpu().numpy()
+
+        d2Pdx2 = torch.gradient(dPdx, spacing = (x,), dim = 0, edge_order = 2)[0]
+        d2Pdy2 = torch.gradient(dPdy, spacing = (y,), dim = 1, edge_order = 2)[0]
+
+        laplace[i] = (d2Pdx2 + d2Pdy2).cpu().numpy()
+    
+    anim = AnimationMaker()
+    anim.add_data(np.abs(dx), "dx")
+    anim.add_data(np.abs(dy), "dy")
+    anim.add_data(laplace, "Laplacian")
+    anim.add_data(sc, "Space charge")
+    anim.add_text([f"Frame {i}" for i in range(101)])
+    anim.save("derivatives.gif", "Derivatives")
+    
+if __name__ == "__main__":
+    derivative_plot()

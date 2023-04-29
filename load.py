@@ -91,6 +91,7 @@ def get_folder_directory(root: str, model: Model):
     # If the folder exists but the logs file does not, this means it is probably the remnants of the previous training
     # where some sort of error probably occured. Use this folder
     if not os.path.isfile(f"{folder_path}/logs.txt"):
+        print("Could not find folder log contents - deleting file contents")
         delete_folder_contents(folder_path)
         return folder_path
     

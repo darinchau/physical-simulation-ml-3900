@@ -123,62 +123,93 @@ class PoissonLoss(nn.Module):
     https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""
     def __init__(self):
         super(PoissonLoss, self).__init__()
-        self.x, self.y = load_spacing()
+        x, y = load_spacing()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.x = torch.tensor(x).to(device).float()
+        self.y = torch.tensor(y).to(device).float()
 
-    def forward(self, output: Tensor, target: Tensor, space_charge: Tensor) -> Tensor:
-        criterion = nn.MSELoss()
-        loss = criterion(output, target)
-        dPdx, dPdy = torch.gradient(output, spacing = (self.x, self.y))
-        d2Pdx2 = torch.gradient(dPdx, spacing = (self.x, self.y))[0]
-        d2Pdy2 = torch.gradient(dPdy, spacing = (self.x, self.y))[1]
-        possion_loss = d2Pdx2 + d2Pdy2 - space_charge
-        return loss + possion_loss
+    def forward(self, output: Tensor, target: Tensor) -> Tensor:
+        mesh = output.reshape(129, 17)
+        sc = target.reshape(129, 17) * 1.6e-19
+        dPdx = torch.gradient(mesh, spacing = (self.x,), dim = 0, edge_order = 2)[0]
+        dPdy = torch.gradient(mesh, spacing = (self.y,), dim = 1, edge_order = 2)[0]
+        d2Pdx2 = torch.gradient(dPdx, spacing = (self.x,), dim = 0, edge_order = 2)[0]
+        d2Pdy2 = torch.gradient(dPdy, spacing = (self.y,), dim = 1, edge_order = 2)[0]
+        poisson_loss = d2Pdx2 + d2Pdy2 - sc
+        return torch.mean(torch.abs(poisson_loss))
 
 # Possion equation verifier - using autograd to try and verify neural nets
 class PoissonNNModel(Model):
     """An implementation of the physics informed neural networks (PINN) following the ideas in https://arxiv.org/pdf/1711.10561.pdf
     We train a neural network while simultaneously trying to verify that the neural network as a function
     satisfies the poisson equation using the informed data."""
-    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset, epochs: int = 3000, verbose: bool = True) -> Any:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        xtest, ytest = self.informed["xtest"], self.informed["ytest"]
-        sctrain, sctest = self.informed["spacecharge"], self.informed["spacecharge-test"]
-        xtrain, ytrain = xtrain.to_tensor().to(device), ytrain.to_tensor().to(device)
+        xtest = self.informed["xtest"].to_tensor().to(device)
+        ytest = self.informed["ytest"].to_tensor().to(device)
+        sctrain = self.informed["spacecharge"].to_tensor().to(device)
+        sctest = self.informed["spacecharge-test"].to_tensor().to(device)
+        xtrain = xtrain.to_tensor().to(device)
+        ytrain = ytrain.to_tensor().to(device)
 
         net = PoissonNN().to(device)
         optimizer = optim.LBFGS(net.parameters(), lr=0.01)
-        criterion = PoissonLoss()
+        criterion1 = nn.MSELoss()
+        criterion2 = PoissonLoss()
 
         history = History()
-
-        epochs = 3000
+        self._logs = []
 
         # Batch size is 1 for us so better use this approach instead
         for i in range(epochs):
+            # Update the history
+            history.update()
+
             # Train loop
-            train_loss = 0.
+            train_mse, train_poi = 0., 0.
             for (x, y, sc) in zip(xtrain, ytrain, sctrain):
-                optimizer.zero_grad()
-                ypred = net(x)
-                loss = criterion(ypred, y, sc)
-                loss.backward()
-                optimizer.step()
-                train_loss += loss.item()
-            history.train(train_loss)
+                def closure():
+                    nonlocal train_mse
+                    nonlocal train_poi
+                    if torch.is_grad_enabled():
+                        optimizer.zero_grad()
+                    ypred = net(x)
+                    mse = criterion1(ypred, y)
+                    poissonloss = criterion2(ypred, sc)
+                    loss = mse + poissonloss
+                    if loss.requires_grad:
+                        loss.backward()
+                    train_mse += mse.item()
+                    train_poi += poissonloss.item()
+                    return loss
+                optimizer.step(closure)
+
+            history.train(float(train_mse)/len(xtrain), "MSE loss")
+            history.train(float(train_poi)/len(xtrain), "Poisson loss")
 
             # Only test every 10 times
             if i % 10 < 9:
                 continue
             
             # Test loop
-            test_loss = 0.
+            test_mse, test_poi = 0., 0.
             with torch.no_grad():
                 for (x, y, sc) in zip(xtest, ytest, sctest):
-                    output = net(x)
-                    loss = criterion(ypred, y, sc)
-                    test_loss += loss.item()
-            history.test(test_loss)
+                    ypred = net(x)
+                    mse = criterion1(ypred, y)
+                    poissonloss = criterion2(ypred, sc)
+                    loss = mse + poissonloss
+                    test_mse += mse.item()
+                    test_poi += poissonloss.item()
+            history.test(float(test_mse)/len(xtest), "MSE loss")
+            history.test(float(test_poi)/len(xtest), "Poisson loss")
+
+            # Print logs if necessary
+            log = f"Trained {i} epochs with train loss {train_mse + train_poi}, test_loss {test_poi + test_mse}"
+            self._logs.append(log)
+            if verbose:
+                print(log)
         
         # Save one's history somewhere
         self._history = history
@@ -190,7 +221,11 @@ class PoissonNNModel(Model):
         output = model(xt)
         return Dataset(output)
     
-    def save_model(self, root: str, name: str):
+    def save(self, root: str, name: str):
         self._history.plot(root, name)
         model_scripted = torch.jit.script(self._net)
         model_scripted.save(f'{root}/{name}.pt')
+
+        with open(f"{root}/{name} history.txt", 'w') as f:
+            for log in self._logs:
+                f.write(log)
