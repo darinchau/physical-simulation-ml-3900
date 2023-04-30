@@ -4,7 +4,8 @@ from load import *
 from dataclasses import dataclass
 import multiprocessing as mp
 import torch
-from anim import AnimationMaker
+from anim import AnimationMaker, DataVisualizer
+from scipy.optimize import minimize
 
 # Root path to store all the data
 ROOT = "./Datas/Week 5"
@@ -106,16 +107,18 @@ def test_all_models(models: list[Model]):
 def derivative_plot():
     # Elementary charge and dielectric constant of silicon
     q = 1.6e-19
-    esi = 12
+    esi = 11.68
 
     meshes = torch.tensor(load_elec_potential())
     x = torch.tensor(load_spacing()[0])
     y = torch.tensor(load_spacing()[1])
     sc = load_space_charge() * (-q) / esi
+    ed = load_e_density()
 
     dx = np.zeros((101, 129, 17))
     dy = np.zeros((101, 129, 17))
     laplace = np.zeros((101, 129, 17))
+    laplace_order_diff = np.zeros((101, 129, 17))
 
     for i, mesh in enumerate(meshes):
         dPdx = torch.gradient(mesh, spacing = (x,), dim = 0, edge_order = 2)[0]
@@ -128,12 +131,29 @@ def derivative_plot():
         d2Pdy2 = torch.gradient(dPdy, spacing = (y,), dim = 1, edge_order = 2)[0]
 
         laplace[i] = (d2Pdx2 + d2Pdy2).cpu().numpy()
-    
+       
     anim = AnimationMaker()
-    anim.add_data(np.abs(dx), "dx")
-    anim.add_data(np.abs(dy), "dy")
-    anim.add_data(laplace, "Laplacian")
+    # anim.add_data(np.abs(dx), "dx")
+    # anim.add_data(np.abs(dy), "dy")
+
+    # laplace[:, :, 11:] = 0
+    C = np.max(np.abs(sc)) * 3.26612616 / np.max(np.abs(laplace)) / 11.68 * 12
+    laplace = laplace * C
+    # sc = np.abs(sc)
+
+    # dv = DataVisualizer(sc)
+    # def minimize_me(x):
+    #     return np.abs(laplace[100, 70, 3] * x - sc[100, 70, 3])
+    # x = minimize(minimize_me, x0 = [3.5], bounds=[(0, 10)]).x
+    # print(x)
+    
+    # dv.add_data(laplace * 3.266, "Laplacian")
+    # dv.add_data(sc, "Space charge")
+    # dv.show()
+
+    anim.add_data(laplace, f"Laplacian x {C:4g}", vmin = np.min(sc), vmax = np.max(sc))
     anim.add_data(sc, "Space charge")
+    anim.add_data(np.log(np.abs(laplace - sc)), "Log absolute difference", vmin = -5)
     anim.add_text([f"Frame {i}" for i in range(101)])
     anim.save("derivatives.gif", "Derivatives")
     

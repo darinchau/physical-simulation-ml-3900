@@ -328,8 +328,8 @@ class DataVisualizer:
                 
                 if k == "Original":
                     continue
-                
-                orig_v = self.datas["Original"][0][:, col, row]
+
+                orig_v = self.cover[:, col, row]
                 ax[1].plot(np.abs(values - orig_v), label = k)
             
             ax[1].set_xlabel("Array index")
