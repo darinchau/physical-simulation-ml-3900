@@ -51,20 +51,23 @@ def laplacian_center_one_frame(fx, x_coords, y_coords, epsilon):
     return f_xx + f_yy
 
 # Calculate the laplacian for one frame
-def laplacian_one_frame(data):
+def laplacian_one_frame(data, x, y):
     # Permittivity of free space
     E0 = 8.8541878128e-12
     epsilon = torch.zeros_like(data) + 11.68 * E0
-    x, y = load_spacing()
-    x = torch.tensor(x).reshape((-1, 1)) + torch.zeros(17)
-    y = torch.tensor(y) + torch.zeros(129, 1)
     return laplacian_center_one_frame(data, x, y, epsilon)
 
 # With reference to Albert's formula and
 # https://en.wikipedia.org/wiki/Finite_difference
-def laplacian(data: NDArray):
+def laplacian(data: torch.Tensor, x: torch.Tensor, y: torch.Tensor):
     """Compute the laplacian of data"""
+    # Compute the laplacian
     result = torch.zeros_like(data)
-    for i in range(len(data)):
-        result[i, 1:-1, 1:-1] = laplacian_one_frame(data[i])
-    return data
+    for i, d in enumerate(data):
+        dPdx = torch.gradient(d, spacing = (x,), dim = 0, edge_order = 2)[0]
+        dPdy = torch.gradient(d, spacing = (y,), dim = 1, edge_order = 2)[0]
+        d2Pdx2 = torch.gradient(dPdx, spacing = (x,), dim = 0, edge_order = 2)[0]
+        d2Pdy2 = torch.gradient(dPdy, spacing = (y,), dim = 1, edge_order = 2)[0]
+        result[i] = d2Pdx2 + d2Pdy2
+    
+    return result

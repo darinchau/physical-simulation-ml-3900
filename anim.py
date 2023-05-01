@@ -20,6 +20,8 @@ class AnimationMaker:
         else:
             assert len(data) == self.nframes
 
+        data = np.array(data)
+        
         if vmin is None:
             vmin = np.min(data)
         if vmax is None:

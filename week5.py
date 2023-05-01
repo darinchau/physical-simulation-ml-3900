@@ -106,22 +106,32 @@ def test_all_models(models: list[Model]):
         pool.starmap(test_model, [(model, training_idxs) for model in models])
 
 def derivative_plot():
-    # Load the electrostatic potential, space charge, and spacing
-    meshes = torch.tensor(load_elec_potential())
-    space_charge = load_space_charge()
-
-    # Permittivity of vaccum
+    # Permittivity of vaccum and unit charge
     Q = 1.602176634e-19
+    Esi = 8.8541878128e-12 * 11.68
 
     # Compute the laplacian
-    div = laplacian(meshes)
-    laplace = (div / -Q).cpu().numpy()
+    # Load the electrostatic potential, space charge, and spacing
+    meshes = torch.tensor(load_elec_potential())
+    x = torch.tensor(load_spacing()[0])
+    y = torch.tensor(load_spacing()[1])
+    space_charge = torch.tensor(load_space_charge())
+
+    # Compute the laplacian
+    def f(val):
+        C = val / -Q
+        laplace = laplacian(meshes, x, y) * C
+        return torch.mean(torch.abs(laplace - space_charge))
+    C = minimize(f, x0 = (1e-5,), bounds = ((0, 10),), tol = 1e-12)
+    C = 9.598e-05
+    laplace = laplacian(meshes, x, y) * C
 
     # Create the animation
     anim = AnimationMaker()
-    anim.add_data(laplace, f"Laplacian")
+    anim.add_data(laplace, f"Laplacian x {C:4g}")
+    # anim.add_data(laplace, f"Laplacian x {C:4g}", vmin = torch.min(space_charge), vmax = torch.max(space_charge))
     anim.add_data(space_charge, "Space charge")
-    anim.add_data(np.log(np.abs(laplace - space_charge)), "Log absolute difference", vmin = -5)
+    anim.add_data(torch.log(torch.abs(laplace - space_charge)), "Log absolute difference", vmin = -5)
     anim.add_text([f"Frame {i}" for i in range(101)])
     anim.save("derivatives.gif", "Derivatives")
     
