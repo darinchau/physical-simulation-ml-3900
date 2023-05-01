@@ -4,9 +4,8 @@ from load import *
 from dataclasses import dataclass
 import multiprocessing as mp
 import torch
-from anim import AnimationMaker, DataVisualizer
+from anim import AnimationMaker, DataVisualizer, log_diff
 from scipy.optimize import minimize
-from derivative import laplacian
 
 # Root path to store all the data
 ROOT = "./Datas/Week 5"
@@ -104,36 +103,44 @@ def test_all_models(models: list[Model]):
     
     with mp.Pool(processes = 4) as pool:
         pool.starmap(test_model, [(model, training_idxs) for model in models])
-
-def derivative_plot():
-    # Permittivity of vaccum and unit charge
-    Q = 1.602176634e-19
-    Esi = 8.8541878128e-12 * 11.68
-
-    # Compute the laplacian
-    # Load the electrostatic potential, space charge, and spacing
-    meshes = torch.tensor(load_elec_potential())
-    x = torch.tensor(load_spacing()[0])
-    y = torch.tensor(load_spacing()[1])
-    space_charge = torch.tensor(load_space_charge())
-
-    # Compute the laplacian
-    def f(val):
-        C = val / -Q
-        laplace = laplacian(meshes, x, y) * C
-        return torch.mean(torch.abs(laplace - space_charge))
-    C = minimize(f, x0 = (1e-5,), bounds = ((0, 10),), tol = 1e-12)
-    C = 9.598e-05
-    laplace = laplacian(meshes, x, y) * C
-
-    # Create the animation
-    anim = AnimationMaker()
-    anim.add_data(laplace, f"Laplacian x {C:4g}")
-    # anim.add_data(laplace, f"Laplacian x {C:4g}", vmin = torch.min(space_charge), vmax = torch.max(space_charge))
-    anim.add_data(space_charge, "Space charge")
-    anim.add_data(torch.log(torch.abs(laplace - space_charge)), "Log absolute difference", vmin = -5)
-    anim.add_text([f"Frame {i}" for i in range(101)])
-    anim.save("derivatives.gif", "Derivatives")
     
 if __name__ == "__main__":
-    derivative_plot()
+    anim = AnimationMaker()
+    target = load_elec_potential()
+    target_literal_flip = target[:, ::-1, :]
+    x_spacing, y_spacing = load_spacing()
+
+    def f(total):
+        target_flipped = np.zeros_like(target)
+        for j in range(129):
+            x = total - x_spacing[j]
+            col = np.abs(x - x_spacing).argmin()
+            target_flipped[:, j, :] = target[:, col, :]
+        return target_flipped
+    
+    # a = 999
+    # best_total = 999999
+    # for i in range(77000, 83000):
+    #     total = i/1000000
+    #     if i%1000 == 0:
+    #         print(total)
+    #     diff = np.sum(np.abs(f(total) - target))
+    #     if diff < best_total:
+    #         best_total = diff
+    #         a = total
+    #         print(f"Found new best total: {best_total} at a = {a}")
+    # print(a)
+    target_flipped = f(0.077964)
+
+    # dv = DataVisualizer()
+    # dv.add_data(target, "Original", 3)
+    # dv.add_data(target_flipped, "Flipped")
+    # dv.add_data(target_literal_flip, "Literal flipped")
+    # dv.show()
+
+    anim.add_data(np.abs(target - target_flipped), "Flip difference")
+    anim.add_data(log_diff(target, target_flipped), "Flip difference log", vmax = -3)
+    anim.add_data(np.abs(target - target_literal_flip), "Flip difference literal")
+    anim.add_data(log_diff(target, target_literal_flip), "Flip difference literal log")
+    anim.add_text([f"Frame {i}" for i in range(101)])
+    anim.save("flipped difference.gif")

@@ -132,8 +132,7 @@ def make_anim(predicted_data, original_data, path = None, title = None):
     error = np.abs(predicted_data - original_data)
     anim.add_data(error, "Error", 0)
 
-    err_log_10 = np.log10(error)
-    err_log_10[error < 1e-20] = np.min(err_log_10[error > 0]) - 1
+    err_log_10 = log_diff(predicted_data, original_data)
     anim.add_data(err_log_10, "Error log plot")
 
     # Errors
@@ -371,3 +370,9 @@ class DataVisualizer:
 
         # Show the plot
         plt.show()
+
+def log_diff(x, y):
+    error = np.abs(x - y)
+    err_log_10 = np.log10(error)
+    err_log_10[error < 1e-20] = np.min(err_log_10[error > 0]) - 1
+    return err_log_10
