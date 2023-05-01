@@ -110,7 +110,8 @@ if __name__ == "__main__":
     target_literal_flip = target[:, ::-1, :]
     x_spacing, y_spacing = load_spacing()
 
-    def f(total):
+    # Flips the array without linear interpolation
+    def flip(total):
         target_flipped = np.zeros_like(target)
         for j in range(129):
             x = total - x_spacing[j]
@@ -118,19 +119,19 @@ if __name__ == "__main__":
             target_flipped[:, j, :] = target[:, col, :]
         return target_flipped
     
-    # a = 999
-    # best_total = 999999
-    # for i in range(77000, 83000):
-    #     total = i/1000000
-    #     if i%1000 == 0:
-    #         print(total)
-    #     diff = np.sum(np.abs(f(total) - target))
-    #     if diff < best_total:
-    #         best_total = diff
-    #         a = total
-    #         print(f"Found new best total: {best_total} at a = {a}")
-    # print(a)
-    target_flipped = f(0.077964)
+    a = 999
+    best_total = 999999
+    for i in range(77000, 83000):
+        total = i/1000000
+        if i%1000 == 0:
+            print(total)
+        diff = np.sum(np.abs(flip(total) - target))
+        if diff < best_total:
+            best_total = diff
+            a = total
+            print(f"Found new best total: {best_total} at a = {a}")
+    print(a)
+    target_flipped = flip(0.077964)
 
     # dv = DataVisualizer()
     # dv.add_data(target, "Original", 3)
@@ -139,8 +140,12 @@ if __name__ == "__main__":
     # dv.show()
 
     anim.add_data(np.abs(target - target_flipped), "Flip difference")
-    anim.add_data(log_diff(target, target_flipped), "Flip difference log", vmax = -3)
+    anim.add_data(log_diff(target, target_flipped), "Flip difference log", vmin = -8)
+    print(f"Total difference for flip = {np.sum(np.abs(target_flipped - target))}")
+    
     anim.add_data(np.abs(target - target_literal_flip), "Flip difference literal")
-    anim.add_data(log_diff(target, target_literal_flip), "Flip difference literal log")
+    anim.add_data(log_diff(target, target_literal_flip), "Flip difference literal log", vmin = -8)
+    print(f"Total difference for literal flip = {np.sum(np.abs(target_literal_flip - target))}")
+    
     anim.add_text([f"Frame {i}" for i in range(101)])
     anim.save("flipped difference.gif")
