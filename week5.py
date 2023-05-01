@@ -6,6 +6,7 @@ import multiprocessing as mp
 import torch
 from anim import AnimationMaker, DataVisualizer
 from scipy.optimize import minimize
+from derivative import laplacian
 
 # Root path to store all the data
 ROOT = "./Datas/Week 5"
@@ -105,36 +106,22 @@ def test_all_models(models: list[Model]):
         pool.starmap(test_model, [(model, training_idxs) for model in models])
 
 def derivative_plot():
-    # Elementary charge and dielectric constant of silicon
-    q = 1.6e-19
-    esi = 11.68
-
     # Load the electrostatic potential, space charge, and spacing
     meshes = torch.tensor(load_elec_potential())
-    x = torch.tensor(load_spacing()[0])
-    y = torch.tensor(load_spacing()[1])
-    space_charge = load_space_charge() * (-q) / esi
+    space_charge = load_space_charge()
+
+    # Permittivity of vaccum
+    Q = 1.602176634e-19
 
     # Compute the laplacian
-    laplacian = np.zeros((101, 129, 17))
-
-    for frame_nr, mesh in enumerate(meshes):
-        dPdx = torch.gradient(mesh, spacing = (x,), dim = 0, edge_order = 2)[0]
-        dPdy = torch.gradient(mesh, spacing = (y,), dim = 1, edge_order = 2)[0]
-        d2Pdx2 = torch.gradient(dPdx, spacing = (x,), dim = 0, edge_order = 2)[0]
-        d2Pdy2 = torch.gradient(dPdy, spacing = (y,), dim = 1, edge_order = 2)[0]
-
-        laplacian[frame_nr] = (d2Pdx2 + d2Pdy2).cpu().numpy()
-    
-    # This weird constant which I have no idea about. This is found using an optimization scheme
-    C = 1e-7
-    laplacian = laplacian * C
+    div = laplacian(meshes)
+    laplace = (div / -Q).cpu().numpy()
 
     # Create the animation
     anim = AnimationMaker()
-    anim.add_data(laplacian, f"Laplacian x {C:4g}", vmin = np.min(space_charge), vmax = np.max(space_charge))
+    anim.add_data(laplace, f"Laplacian")
     anim.add_data(space_charge, "Space charge")
-    anim.add_data(np.log(np.abs(laplacian - space_charge)), "Log absolute difference", vmin = -5)
+    anim.add_data(np.log(np.abs(laplace - space_charge)), "Log absolute difference", vmin = -5)
     anim.add_text([f"Frame {i}" for i in range(101)])
     anim.save("derivatives.gif", "Derivatives")
     
