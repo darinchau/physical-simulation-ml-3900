@@ -109,51 +109,32 @@ def derivative_plot():
     q = 1.6e-19
     esi = 11.68
 
+    # Load the electrostatic potential, space charge, and spacing
     meshes = torch.tensor(load_elec_potential())
     x = torch.tensor(load_spacing()[0])
     y = torch.tensor(load_spacing()[1])
-    sc = load_space_charge() * (-q) / esi
-    ed = load_e_density()
+    space_charge = load_space_charge() * (-q) / esi
 
-    dx = np.zeros((101, 129, 17))
-    dy = np.zeros((101, 129, 17))
-    laplace = np.zeros((101, 129, 17))
-    laplace_order_diff = np.zeros((101, 129, 17))
+    # Compute the laplacian
+    laplacian = np.zeros((101, 129, 17))
 
-    for i, mesh in enumerate(meshes):
+    for frame_nr, mesh in enumerate(meshes):
         dPdx = torch.gradient(mesh, spacing = (x,), dim = 0, edge_order = 2)[0]
-        dx[i] = dPdx.cpu().numpy()
-
         dPdy = torch.gradient(mesh, spacing = (y,), dim = 1, edge_order = 2)[0]
-        dy[i] = dPdy.cpu().numpy()
-
         d2Pdx2 = torch.gradient(dPdx, spacing = (x,), dim = 0, edge_order = 2)[0]
         d2Pdy2 = torch.gradient(dPdy, spacing = (y,), dim = 1, edge_order = 2)[0]
 
-        laplace[i] = (d2Pdx2 + d2Pdy2).cpu().numpy()
-       
-    anim = AnimationMaker()
-    # anim.add_data(np.abs(dx), "dx")
-    # anim.add_data(np.abs(dy), "dy")
-
-    # laplace[:, :, 11:] = 0
-    C = np.max(np.abs(sc)) * 3.26612616 / np.max(np.abs(laplace)) / 11.68 * 12
-    laplace = laplace * C
-    # sc = np.abs(sc)
-
-    # dv = DataVisualizer(sc)
-    # def minimize_me(x):
-    #     return np.abs(laplace[100, 70, 3] * x - sc[100, 70, 3])
-    # x = minimize(minimize_me, x0 = [3.5], bounds=[(0, 10)]).x
-    # print(x)
+        laplacian[frame_nr] = (d2Pdx2 + d2Pdy2).cpu().numpy()
     
-    # dv.add_data(laplace * 3.266, "Laplacian")
-    # dv.add_data(sc, "Space charge")
-    # dv.show()
+    # This weird constant which I have no idea about. This is found using an optimization scheme
+    C = 1e-7
+    laplacian = laplacian * C
 
-    anim.add_data(laplace, f"Laplacian x {C:4g}", vmin = np.min(sc), vmax = np.max(sc))
-    anim.add_data(sc, "Space charge")
-    anim.add_data(np.log(np.abs(laplace - sc)), "Log absolute difference", vmin = -5)
+    # Create the animation
+    anim = AnimationMaker()
+    anim.add_data(laplacian, f"Laplacian x {C:4g}", vmin = np.min(space_charge), vmax = np.max(space_charge))
+    anim.add_data(space_charge, "Space charge")
+    anim.add_data(np.log(np.abs(laplacian - space_charge)), "Log absolute difference", vmin = -5)
     anim.add_text([f"Frame {i}" for i in range(101)])
     anim.save("derivatives.gif", "Derivatives")
     
