@@ -1,14 +1,14 @@
 import numpy as np
-from anim import AnimationMaker, log_diff, DataVisualizer
+import torch
+from anim import AnimationMaker, log_diff
 from load import load_spacing, load_elec_potential, load_space_charge
 
 def derivative_one_frame(data, x, y):
-    row_length = len(data[0])
-    frame_result = np.zeros_like(data)
+    frame_result = torch.zeros_like(data)
 
     # Ignores calculating at edges of the array
     for i in range(1, len(data) - 2):
-        for j in range(1, row_length - 1):
+        for j in range(1, len(data[0]) - 1):
             # unit of "eps_*": F/cm = C/(V*cm) 
             # unit of x and y are in um (converted to cm later)
             # unit of electrostatic potential is in V
@@ -51,7 +51,7 @@ def derivative_one_frame(data, x, y):
 
 # Wrapper around albert's function
 def derivative_all(data):
-    result = np.zeros_like(data)
+    result = torch.zeros_like(data)
     x, y = load_spacing()
     for i in range(101):
         result[i] = derivative_one_frame(data[i], x, y)
@@ -60,11 +60,11 @@ def derivative_all(data):
 q = 1.60217663e-19
 
 anim = AnimationMaker()
-space_charge = load_space_charge() * -q
+space_charge = torch.tensor(load_space_charge()) * -q
 anim.add_data(space_charge, "Space charge")
 
 # Make a cheat about the laplacian
-laplacian = derivative_all(load_elec_potential()) * -q
+laplacian = derivative_all(torch.tensor(load_elec_potential())) * -q
 laplacian[:, 0, :] = space_charge[:, 0, :]
 laplacian[:, -1, :] = space_charge[:, -1, :]
 laplacian[:, :, 0] = space_charge[:, :, 0]

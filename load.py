@@ -5,6 +5,8 @@ import numpy as np
 from numpy.typing import NDArray
 import h5py
 from models_base import Model
+import torch
+from torch import Tensor
 
 SPACING_X = np.load("mesh_data_x.npy")
 SPACING_Y = np.load("mesh_data_y.npy")
@@ -13,30 +15,17 @@ ELECTRON_DENSITY = np.load("mesh_data_edensity.npy")
 SPACE_CHARGE = np.load("mesh_data_space_charge.npy")
 
 # Load and return data. We expect data to be some 3 dimensional np array (N, rows, cols).
-def load_elec_potential():
-    return np.array(ELECTRIC_POTENTIAL)
+def load_elec_potential() -> Tensor:
+    return torch.tensor(ELECTRIC_POTENTIAL)
 
-def load_e_density():
-    return np.nan_to_num(ELECTRON_DENSITY, nan=0)
+def load_e_density() -> Tensor:
+    return torch.tensor(np.nan_to_num(ELECTRON_DENSITY, nan=0))
 
-def load_spacing():
-    return np.array(SPACING_X), np.array(SPACING_Y)
+def load_spacing() -> Tensor:
+    return torch.tensor(SPACING_X), torch.tensor(SPACING_Y)
 
-def load_space_charge():
-    return np.nan_to_num(SPACE_CHARGE, nan=0)
-
-# There is a zeros region somewhere in the e density. Cut that region
-def load_e_density_non_zero():
-    return load_e_density()[:, :, :11]
-
-def load_space_charge_non_zero():
-    return load_space_charge()[:, :, :11]
-
-def load_log_e_density():
-    log_e_density = load_e_density()
-    log_e_density[log_e_density < 1] = 1
-    log_e_density = np.log10(log_e_density)
-    return log_e_density
+def load_space_charge() -> Tensor:
+    return torch.tensor(np.nan_to_num(SPACE_CHARGE, nan=0))
 
 ### Save h5 files
 def save_h5(d: dict[str, NDArray], path: str):
