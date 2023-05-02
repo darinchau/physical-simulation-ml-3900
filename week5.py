@@ -103,76 +103,13 @@ def test_all_models(models: list[Model]):
     
     with mp.Pool(processes = 4) as pool:
         pool.starmap(test_model, [(model, training_idxs) for model in models])
+
+# Debug the model - only train it on first 5
+def debug_model(model: Model):
+    training_idxs = [
+        TrainingIndex("First 5", range(5)),
+    ]
+    test_model(model, training_idxs)
     
 if __name__ == "__main__":
-    anim = AnimationMaker()
-    target = load_elec_potential()
-    x_spacing, y_spacing = load_spacing()
-
-    # Flips the array without linear interpolation
-    def flip(total):
-        target_flipped = np.zeros_like(target)
-        for j in range(129):
-            x = total - x_spacing[j]
-            col = np.abs(x - x_spacing).argmin()
-            target_flipped[:, j, :] = target[:, col, :]
-        return target_flipped
-    
-    target_flipped = flip(0.077964)
-
-    # Flip with linear interpolation
-    def flip_lerp(total):
-        target_flipped = np.zeros_like(target)
-        for j in range(129):
-            x = total - x_spacing[j]
-            col = np.abs(x - x_spacing).argmin()
-            col1 = np.searchsorted(x_spacing, x, side='right') - 1
-            col2 = col1 + 1
-            if col2 == 129:
-                target_flipped[:, j, :] = target[:, 128, :]
-            else:
-                weighting = (x_spacing[col2] - x)/(x_spacing[col2] - x_spacing[col1])
-                target_flipped[:, j, :] = weighting * target[:, col1, :] + (1-weighting) * target[:, col2, :]
-        return target_flipped
-    
-    target_lerp_flip = flip_lerp(0.077981)
-
-    def flip_mix(total):
-        target_flipped = np.zeros_like(target)
-        for j in range(129):
-            x = total - x_spacing[j]
-
-            # Use normal flip near the edges
-            if x < 0.02 or total - x < 0.02:
-                col = np.abs(x - x_spacing).argmin()
-                target_flipped[:, j, :] = target[:, col, :]
-                continue
-            
-            # Use lerp near the center
-            col1 = np.searchsorted(x_spacing, x, side='right') - 1
-            col2 = col1 + 1
-            weighting = (x_spacing[col2] - x)/(x_spacing[col2] - x_spacing[col1])
-            target_flipped[:, j, :] = weighting * target[:, col1, :] + (1-weighting) * target[:, col2, :]
-        return target_flipped
-    
-    target_mix_flip = flip_mix(0.077976)
-
-    # dv = DataVisualizer()
-    # dv.add_data(target, "Original", 3)
-    # dv.add_data(target_flipped, "Flipped")
-    # dv.add_data(target_literal_flip, "Literal flipped")
-    # dv.show()
-
-    anim.add_data(log_diff(target, target_flipped), "Flip difference log", vmin = -8)
-    print(f"Total difference for flip = {np.sum(np.abs(target_flipped - target))}")
-    
-    anim.add_data(log_diff(target, target_lerp_flip), "Flip difference lerp log", vmin = -8)
-    print(f"Total difference for lerp flip = {np.sum(np.abs(target_lerp_flip - target))}")
-
-    anim.add_data(np.abs(target - target_mix_flip), "Flip difference mix")
-    anim.add_data(log_diff(target, target_mix_flip), "Flip difference mix log", vmin = -8)
-    print(f"Total difference for lerp flip = {np.sum(np.abs(target_mix_flip - target))}")
-
-    
-    anim.add_text([f"Frame {i}" for i in range(101)])
-    anim.save("flipped difference.gif")
+    debug_model(SymmetricNNModel())

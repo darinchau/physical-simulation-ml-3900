@@ -26,7 +26,7 @@ __all__ = (
     "GaussianModel",
     "LinearLinearInformedModel",
     "PoissonNNModel",
-    ""
+    "SymmetricNNModel"
 )
 
 ## For example this is how you can wrap around a linear model
@@ -199,10 +199,33 @@ class SymetricNN(nn.Module):
             nn.Linear(100, 17 * 69),
             nn.Sigmoid()
         )
+        self.x_spacing = load_spacing()[0]
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def forward(self, x: torch.Tensor):
         x = self.fc(x)
         x = x.reshape(-1, 69, 17)
+        total = 0.077976
+        
+        target = torch.zeros(x.shape[0], 129, 17).to(self.device)
+        target[:, :69, :] = x
+
+        for j in range(70, 129):
+            x_pos = total - self.x_spacing[j]
+
+            # Use normal flip near the edges
+            if total - x_pos < 0.02:
+                col = np.abs(x_pos - self.x_spacing).argmin()
+                target[:, j, :] = x[:, col, :]
+                continue
+            
+            # Use lerp near the center
+            col1 = np.searchsorted(self.x_spacing, x_pos, side='right') - 1
+            col2 = col1 + 1
+            weighting = (self.x_spacing[col2] - x_pos)/(self.x_spacing[col2] - self.x_spacing[col1])
+            target[:, j, :] = weighting * x[:, col1, :] + (1-weighting) * x[:, col2, :]
+        
+        return target.reshape(-1, 2193)
 
 class SymmetricNNModel(Model):
     """Uses the fact the thing is almost symmetric and tries to define some loss to penalise the training if the result is not symmetric"""
@@ -216,10 +239,9 @@ class SymmetricNNModel(Model):
         xtrain = xtrain.to_tensor().to(device)
         ytrain = ytrain.to_tensor().to(device)
 
-        net = PoissonNN().to(device)
+        net = SymetricNN().to(device)
         optimizer = optim.LBFGS(net.parameters(), lr=0.01)
-        criterion1 = nn.MSELoss()
-        criterion2 = PoissonLoss()
+        criterion = nn.MSELoss()
 
         history = History()
         self._logs = []
@@ -230,46 +252,37 @@ class SymmetricNNModel(Model):
             history.update()
 
             # Train loop
-            train_mse, train_poi = 0., 0.
-            for (x, y, sc) in zip(xtrain, ytrain, sctrain):
+            train_mse = 0.
+            for (x, y) in zip(xtrain, ytrain):
                 def closure():
                     nonlocal train_mse
-                    nonlocal train_poi
                     if torch.is_grad_enabled():
                         optimizer.zero_grad()
                     ypred = net(x)
-                    mse = criterion1(ypred, y)
-                    poissonloss = criterion2(ypred, sc)
-                    loss = mse + poissonloss
-                    if loss.requires_grad:
-                        loss.backward()
+                    mse = criterion(ypred, y)
+                    if mse.requires_grad:
+                        mse.backward()
                     train_mse += mse.item()
-                    train_poi += poissonloss.item()
-                    return loss
+                    return mse
                 optimizer.step(closure)
 
             history.train(float(train_mse)/len(xtrain), "MSE loss")
-            history.train(float(train_poi)/len(xtrain), "Poisson loss")
 
             # Only test every 10 times
             if i % 10 < 9:
                 continue
             
             # Test loop
-            test_mse, test_poi = 0., 0.
+            test_mse = 0.
             with torch.no_grad():
                 for (x, y, sc) in zip(xtest, ytest, sctest):
                     ypred = net(x)
-                    mse = criterion1(ypred, y)
-                    poissonloss = criterion2(ypred, sc)
-                    loss = mse + poissonloss
+                    mse = criterion(ypred, y)
                     test_mse += mse.item()
-                    test_poi += poissonloss.item()
             history.test(float(test_mse)/len(xtest), "MSE loss")
-            history.test(float(test_poi)/len(xtest), "Poisson loss")
 
             # Print logs if necessary
-            log = f"Trained {i} epochs with train loss {train_mse + train_poi}, test_loss {test_poi + test_mse}"
+            log = f"Trained {i} epochs with train loss {train_mse}, test_loss {test_mse}"
             self._logs.append(log)
             if verbose:
                 print(log)
