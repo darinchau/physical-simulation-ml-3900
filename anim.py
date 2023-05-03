@@ -28,7 +28,7 @@ class AnimationMaker:
             vmin = np.min(data)
         if vmax is None:
             vmax = np.max(data)
-        self.datas.append((np.array(data), title, vmin, vmax, norm))
+        self.datas.append((data, title, vmin, vmax, norm))
         self.height_ratios.append(5)
         return self
 
@@ -292,7 +292,7 @@ class DataVisualizer:
         if cover is None:
             self.cover = load_elec_potential()
         else:
-            self.cover = cover
+            self.cover = np.array(cover)
     
     def add_data(self, data, name, thickness = 1.5):
         self.datas[name] = (np.array(data), thickness)
