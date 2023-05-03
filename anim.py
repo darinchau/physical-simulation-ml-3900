@@ -129,6 +129,7 @@ def make_anim(predicted_data, original_data, path = None, title = None):
     data_vmin, data_vmax = np.min(original_data), np.max(original_data)
     anim.add_data(original_data, "Original data")
 
+    anim.add_data(predicted_data, "Predicted data")
     anim.add_data(predicted_data, "Predicted data", data_vmin, data_vmax)
 
     error = np.abs(predicted_data - original_data)
@@ -209,7 +210,7 @@ def make_plots(path, model_name = None, include_keys: list[str] | None = None):
     frame_mid_potential = StaticPlotMaker()
     
     # Loop through keys of the file and print them
-    original_data = load_elec_potential()
+    original_data = np.array(load_elec_potential())
     data_mid, data_outer = split_mid_outer(original_data)
     
     # Plot the middle potential for the original data

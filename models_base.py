@@ -21,7 +21,8 @@ __all__ = (
     "Dataset",
     "Model",
     "MultiModel",
-    "History"
+    "History",
+    "NeuralNetModel"
 )
 
 class TrainingError(Exception):
@@ -277,7 +278,7 @@ class Model(ABC):
         
         return ypred
     
-    def save(self, root: str):
+    def save(self, root: str, name: str):
         """Overload this if you want to save your models in the folder 'root'"""
         pass
 
@@ -369,6 +370,26 @@ class History:
         ax.legend()
         ax.set_title(f"Train/Test Error plot")
         fig.savefig(f"{root}/{name} training loss.png")
+
+class NeuralNetModel(Model):
+    """A model except we expose the epochs argument for you, and turn on/off torch grad whenever necessary."""
+    @virtual
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset, epochs: int = 50, verbose: bool = True) -> Any:
+        raise NotImplementedError
+    
+    def _fit_inner(self, xtrain: Dataset, ytrain: Dataset):
+        return self.fit_logic(xtrain, ytrain, self._epochs, self._verbose)
+
+    def _predict_inner(self, model, xtest: Dataset) -> Dataset:
+        with torch.no_grad():
+            ypred = self.predict_logic(model, xtest)
+        return ypred
+    
+    def __init__(self, epochs: int, verbose: bool = True):
+        super().__init__()
+        self._epochs = epochs
+        self._verbose = verbose
+        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Tests
 def test():

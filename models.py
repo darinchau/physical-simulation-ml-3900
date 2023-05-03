@@ -14,9 +14,10 @@ import torch
 from torch import nn
 from torch.utils.data import TensorDataset, DataLoader
 import torch.optim as optim
-from models_base import TrainingError, Model, Dataset, History
+from models_base import *
 from torch import Tensor
-from load import load_spacing, load_normalize_space_charge, derivative_all
+from load import load_spacing
+from derivative import laplacian
 
 __all__ = (
     "TrainingError",
@@ -93,23 +94,30 @@ class PoissonLoss(nn.Module):
     """Gives the poisson equation - the value of ∇²φ = S
     where S is the space charge described in p265 of the PDF 
     https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
+    def __init__(self):
+        super().__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        x, y = load_spacing()
+        self.x = x.to(self.device)
+        self.y = y.to(self.device)
+    
     def forward(self, x, space_charge):
-        Q = 1.60217663e-19
-        x = x.reshape(-1, 129, 17)
-        space_charge = space_charge.reshape(-1, 129, 17) * -Q
-        dx = derivative_all(x) * -Q
-        diff = torch.abs(space_charge[:, 1:-1, 1:-1] - dx[:, 1:-1, 1:-1])
-        return torch.mean(diff)
-
+        # Refer to the compare_derivative method
+        q = 1.60217663e-19
+        ep = x.reshape(-1, 129, 17)
+        sc = space_charge.reshape(-1, 129, 17) * -q
+        ys = (1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15)
+        lapla = laplacian(ep, torch.zeros_like(ep).to(self.device), self.x, self.y)
+        rmse = torch.sqrt(torch.mean((sc[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2))
+        return rmse
 
 # Possion equation verifier - using autograd to try and verify neural nets
-class PoissonNNModel(Model):
+class PoissonNNModel(NeuralNetModel):
     """An implementation of the physics informed neural networks (PINN) following the ideas in https://arxiv.org/pdf/1711.10561.pdf
     We train a neural network while simultaneously trying to verify that the neural network as a function
     satisfies the poisson equation using the informed data."""
-    def fit_logic(self, xtrain: Dataset, ytrain: Dataset, epochs: int = 50, verbose: bool = True) -> Any:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset, epochs: int, verbose: bool = True) -> Any:
+        device = self._device
         xtest = self.informed["xtest"].to_tensor().to(device)
         ytest = self.informed["ytest"].to_tensor().to(device)
         sctrain = self.informed["spacecharge"].to_tensor().to(device)
@@ -170,7 +178,7 @@ class PoissonNNModel(Model):
             history.test(float(test_poi)/len(xtest), "Poisson loss")
 
             # Print logs if necessary
-            log = f"Trained {i} epochs with train loss {train_mse + train_poi}, test_loss {test_poi + test_mse}"
+            log = f"Trained {i} epochs on {self.name} with train loss {train_mse + train_poi}, test_loss {test_poi + test_mse}"
             self._logs.append(log)
             if verbose:
                 print(log)
@@ -181,7 +189,7 @@ class PoissonNNModel(Model):
         return net
     
     def predict_logic(self, model: nn.Module, xtest: Dataset) -> Dataset:
-        xt = xtest.to_tensor()
+        xt = xtest.to_tensor().to(self._device)
         output = model(xt)
         return Dataset(output)
     
@@ -193,6 +201,7 @@ class PoissonNNModel(Model):
         with open(f"{root}/{name} history.txt", 'w') as f:
             for log in self._logs:
                 f.write(log)
+                f.write("\n")
 
 class SymetricNN(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
