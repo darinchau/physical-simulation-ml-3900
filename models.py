@@ -16,7 +16,7 @@ from torch.utils.data import TensorDataset, DataLoader
 import torch.optim as optim
 from models_base import TrainingError, Model, Dataset, History
 from torch import Tensor
-from load import load_spacing
+from load import load_spacing, load_normalize_space_charge, derivative_all
 
 __all__ = (
     "TrainingError",
@@ -92,16 +92,22 @@ class PoissonNN(nn.Module):
 class PoissonLoss(nn.Module):
     """Gives the poisson equation - the value of ∇²φ = S
     where S is the space charge described in p265 of the PDF 
-    https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""
-    def __init__(self, *args, **kwargs) -> None:
-        raise NotImplementedError
+    https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
+    def forward(self, x, space_charge):
+        Q = 1.60217663e-19
+        x = x.reshape(-1, 129, 17)
+        space_charge = space_charge.reshape(-1, 129, 17) * -Q
+        dx = derivative_all(x) * -Q
+        diff = torch.abs(space_charge[:, 1:-1, 1:-1] - dx[:, 1:-1, 1:-1])
+        return torch.mean(diff)
+
 
 # Possion equation verifier - using autograd to try and verify neural nets
 class PoissonNNModel(Model):
     """An implementation of the physics informed neural networks (PINN) following the ideas in https://arxiv.org/pdf/1711.10561.pdf
     We train a neural network while simultaneously trying to verify that the neural network as a function
     satisfies the poisson equation using the informed data."""
-    def fit_logic(self, xtrain: Dataset, ytrain: Dataset, epochs: int = 3000, verbose: bool = True) -> Any:
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset, epochs: int = 50, verbose: bool = True) -> Any:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         xtest = self.informed["xtest"].to_tensor().to(device)

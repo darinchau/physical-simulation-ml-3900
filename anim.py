@@ -5,6 +5,8 @@ from matplotlib import animation
 import numpy as np
 from load import load_spacing, load_elec_potential
 import h5py
+from torch import Tensor
+import torch
 
 # A class wrapper to help us plot data. We assume all error checking has been done
 class AnimationMaker:
@@ -372,7 +374,12 @@ class DataVisualizer:
         plt.show()
 
 def log_diff(x, y):
-    error = np.abs(x - y)
-    err_log_10 = np.log10(error)
-    err_log_10[error < 1e-20] = np.min(err_log_10[error > 0]) - 1
+    if isinstance(x, Tensor):
+        error = torch.abs(x - y)
+        err_log_10 = torch.log10(error)
+        err_log_10[error < 1e-20] = torch.min(err_log_10[error > 0]) - 1
+    else:
+        error = np.abs(x - y)
+        err_log_10 = np.log10(error)
+        err_log_10[error < 1e-20] = np.min(err_log_10[error > 0]) - 1
     return err_log_10

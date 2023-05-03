@@ -151,16 +151,6 @@ class Dataset:
         excl_data = Dataset(flatten[exclude_data])
         excl_data.wrap_inplace((len(exclude_data),) + shape[1:])
         return data, excl_data
-
-    @staticmethod
-    def split(x: Dataset, y: Dataset, train_index: list[int]):
-        """Performs train test split"""
-        if len(x) != len(y):
-            raise ValueError(f"Cannot split data because x ({len(x)}) and y ({len(y)}) has different length")
-
-        xtrain, xtest = x.split_at(train_index)
-        ytrain, ytest = y.split_at(train_index)
-        return xtrain, ytrain, xtest, ytest
     
     # Gets the n data of each dataset. Does not create a clone
     def __getitem__(self, i: int | slice) -> Dataset:

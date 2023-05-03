@@ -112,4 +112,4 @@ def debug_model(model: Model):
     test_model(model, training_idxs)
     
 if __name__ == "__main__":
-    debug_model(SymmetricNNModel())
+    debug_model(PoissonNNModel())
