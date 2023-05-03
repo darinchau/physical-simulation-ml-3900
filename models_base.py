@@ -204,10 +204,15 @@ class Model(ABC):
         w.append(s[k:])
         return ' '.join(w)
     
-    def refresh(self):
-        """Refresh the model for a new training"""
-        self._trained = False
-        self._informed = {}
+    def __new__(cls, *args, **kwargs):
+        self = super().__new__(cls)
+        self._init_args = args
+        self._init_kwargs = kwargs
+        return self
+
+    def get_new(self) -> Model:
+        """Return a fresh new instance of self with the same initialize arguments"""
+        return type(self)(*self._init_args, **self._init_kwargs)
     
     @property
     def trained(self) -> bool:
@@ -378,7 +383,7 @@ class NeuralNetModel(Model):
         raise NotImplementedError
     
     def _fit_inner(self, xtrain: Dataset, ytrain: Dataset):
-        return self.fit_logic(xtrain, ytrain, self._epochs, self._verbose)
+        return self.fit_logic(xtrain, ytrain, self.epochs, self._verbose)
 
     def _predict_inner(self, model, xtest: Dataset) -> Dataset:
         with torch.no_grad():
@@ -387,7 +392,7 @@ class NeuralNetModel(Model):
     
     def __init__(self, epochs: int, verbose: bool = True):
         super().__init__()
-        self._epochs = epochs
+        self.epochs = epochs
         self._verbose = verbose
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

@@ -20,7 +20,7 @@ class TrainingIndex:
         return iter(self.indices)
 
 # Trains a model
-def train(model: Model, training_idxs: list[TrainingIndex], root: str):
+def train(m: Model, training_idxs: list[TrainingIndex], root: str):
     vg = Dataset(np.arange(101).reshape(101, 1) / 100 * 0.0075)
     potential = Dataset(load_elec_potential())
     edensity = Dataset(load_e_density())
@@ -30,7 +30,7 @@ def train(model: Model, training_idxs: list[TrainingIndex], root: str):
     
     for idxs in training_idxs:
         # Refresh the model
-        model.refresh()
+        model = m.refresh()
 
         # Split out the training data
         xtrain, xtest = vg.split_at(idxs)

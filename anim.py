@@ -130,7 +130,7 @@ def make_anim(predicted_data, original_data, path = None, title = None):
     anim.add_data(original_data, "Original data")
 
     anim.add_data(predicted_data, "Predicted data")
-    anim.add_data(predicted_data, "Predicted data", data_vmin, data_vmax)
+    anim.add_data(predicted_data, "Predicted data (rescaled)", data_vmin, data_vmax)
 
     error = np.abs(predicted_data - original_data)
     anim.add_data(error, "Error", 0)
@@ -221,7 +221,7 @@ def make_plots(path, model_name = None, include_keys: list[str] | None = None):
         if include_keys is not None:
             for key in include_keys:
                 if key not in f.keys():
-                    print(f"The key {key} is not found in the file.")
+                    print(f"The key {key} is not found in the file for {model_name}.")
         
         # Loop through all the keys to make the animation and calculate the error
         for key in f.keys():

@@ -230,27 +230,24 @@ class SymetricNN(nn.Module):
 
             # Use normal flip near the edges
             if total - x_pos < 0.02:
-                col = np.abs(x_pos - self.x_spacing).argmin()
+                col = torch.abs(x_pos - self.x_spacing).argmin()
                 target[:, j, :] = x[:, col, :]
                 continue
             
             # Use lerp near the center
-            col1 = np.searchsorted(self.x_spacing, x_pos, side='right') - 1
+            col1 = torch.searchsorted(self.x_spacing, x_pos, side='right') - 1
             col2 = col1 + 1
             weighting = (self.x_spacing[col2] - x_pos)/(self.x_spacing[col2] - self.x_spacing[col1])
             target[:, j, :] = weighting * x[:, col1, :] + (1-weighting) * x[:, col2, :]
         
         return target.reshape(-1, 2193)
 
-class SymmetricNNModel(Model):
+class SymmetricNNModel(NeuralNetModel):
     """Uses the fact the thing is almost symmetric and tries to define some loss to penalise the training if the result is not symmetric"""
     def fit_logic(self, xtrain: Dataset, ytrain: Dataset, epochs: int = 3000, verbose: bool = True) -> Any:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+        device = self._device
         xtest = self.informed["xtest"].to_tensor().to(device)
         ytest = self.informed["ytest"].to_tensor().to(device)
-        sctrain = self.informed["spacecharge"].to_tensor().to(device)
-        sctest = self.informed["spacecharge-test"].to_tensor().to(device)
         xtrain = xtrain.to_tensor().to(device)
         ytrain = ytrain.to_tensor().to(device)
 
@@ -290,7 +287,7 @@ class SymmetricNNModel(Model):
             # Test loop
             test_mse = 0.
             with torch.no_grad():
-                for (x, y, sc) in zip(xtest, ytest, sctest):
+                for (x, y) in zip(xtest, ytest):
                     ypred = net(x)
                     mse = criterion(ypred, y)
                     test_mse += mse.item()
@@ -308,7 +305,7 @@ class SymmetricNNModel(Model):
         return net
     
     def predict_logic(self, model: nn.Module, xtest: Dataset) -> Dataset:
-        xt = xtest.to_tensor()
+        xt = xtest.to_tensor().to(self._device)
         output = model(xt)
         return Dataset(output)
     
@@ -320,3 +317,4 @@ class SymmetricNNModel(Model):
         with open(f"{root}/{name} history.txt", 'w') as f:
             for log in self._logs:
                 f.write(log)
+                f.write("\n")

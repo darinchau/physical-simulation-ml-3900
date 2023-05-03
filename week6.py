@@ -3,8 +3,7 @@ from models import *
 from load import *
 from dataclasses import dataclass
 import multiprocessing as mp
-import torch
-from anim import AnimationMaker, DataVisualizer, log_diff, make_plots
+from anim import make_plots
 
 # Root path to store all the data
 ROOT = "./Datas/Week 6"
@@ -17,49 +16,47 @@ class TrainingIndex:
     
     def __iter__(self):
         return iter(self.indices)
-
-# Trains a model
-def train(model: Model, training_idxs: list[TrainingIndex], root: str):
+    
+def train(model: Model, idx: TrainingIndex, root: str):
+    # Get the datas
     vg = Dataset(np.arange(101).reshape(101, 1) / 100 * 0.0075)
     potential = Dataset(load_elec_potential())
     edensity = Dataset(load_e_density())
     space_charge = Dataset(load_space_charge())
 
-    predictions = {}
+    # Refresh the model
+    model = model.get_new()
+
+    # Split out the training data
+    xtrain, xtest = vg.split_at(idx)
+    ytrain, ytest = potential.split_at(idx)
+    edtrain, edtest = edensity.split_at(idx)
+    sctrain, sctest = space_charge.split_at(idx)
     
-    for idxs in training_idxs:
-        # Refresh the model
-        model.refresh()
+    # Perform informed training
+    model.inform(edtrain, "edensity")
+    model.inform(edtest, "edensity-test")
+    model.inform(sctrain, "spacecharge")
+    model.inform(sctest, "spacecharge-test")
+    model.inform(xtest, "xtest")
+    model.inform(ytest, "ytest")
 
-        # Split out the training data
-        xtrain, xtest = vg.split_at(idxs)
-        ytrain, ytest = potential.split_at(idxs)
-        edtrain, edtest = edensity.split_at(idxs)
-        sctrain, sctest = space_charge.split_at(idxs)
-        
-        # Perform informed training
-        model.inform(edtrain, "edensity")
-        model.inform(edtest, "edensity-test")
-        model.inform(sctrain, "spacecharge")
-        model.inform(sctest, "spacecharge-test")
-        model.inform(xtest, "xtest")
-        model.inform(ytest, "ytest")
+    # Train the model
+    try:
+        model.fit(xtrain, ytrain)
+    except TrainingError as e:
+        return None
+    
+    # Test the model
+    ypred = model.predict(vg).to_tensor().cpu().numpy().reshape(101, 129, 17)
 
-        # Train the model
-        try:
-            model.fit(xtrain, ytrain)
-        except TrainingError as e:
-            continue
+    # Save the model
+    model.save(root, idx.name)
 
-        # Test the model
-        ypred = model.predict(vg).to_tensor().cpu().numpy().reshape(101, 129, 17)
+    # Print logs
+    print(f"Finished training {model.name} with {idx.name}")
 
-        # Save the prediction
-        predictions[idxs.name] = np.array(ypred)
-
-        # Save the model
-        model.save(root, idxs.name)
-    return predictions
+    return idx.name, np.array(ypred)
 
 # Puts a model to the test with the given training indices
 def test_model(model: Model, training_idxs: list[TrainingIndex]):
@@ -67,7 +64,14 @@ def test_model(model: Model, training_idxs: list[TrainingIndex]):
     path = get_folder_directory(ROOT, model)
 
     # Train the model
-    predictions = train(model, training_idxs, path)
+    if len(training_idxs) == 1:
+        name, pred = train(model, training_idxs[0], path)
+        predictions = {name: pred}
+    else:
+        with mp.Pool(processes = 4) as pool:
+            m = model.get_new()
+            results = pool.starmap(train, [(m, idx, path) for idx in training_idxs])
+            predictions = {k: v for k, v in filter(lambda x: x is not None, results)}
 
     # Create logs
     with open(f"{path}/logs.txt", "w", encoding="utf-8") as f:
@@ -105,13 +109,18 @@ def test_all_models(models: list[Model]):
 # Debug the model - only train it on first 5
 def debug_model(model: Model):
     path = get_folder_directory(ROOT, model)
-    predictions = train(model, [TrainingIndex("First 5", range(5))], path)
+    predictions = train(model, TrainingIndex("First 20", range(20)), path)
+    if predictions is None:
+        print("Encountered training error")
+        return
+    
+    predictions = {predictions[0]: predictions[1]}
 
     with open(f"{path}/logs.txt", "w", encoding="utf-8") as f:
         f.write(model.logs)
     
     save_h5(predictions, f"{path}/predictions.h5")
-    make_plots(path, None, ["First 5"])
+    make_plots(path, None, ["First 20"])
     
 if __name__ == "__main__":
-    debug_model(PoissonNNModel(epochs=50))
+    debug_model(SymmetricNNModel(epochs=50))
