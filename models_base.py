@@ -367,9 +367,9 @@ class History:
 
     def plot(self, root: str, name: str):
         fig, ax = plt.subplots()
-        for name in self.names:
-            ax.plot(self.train_datas[name + 'x'], self.train_datas[name + 'y'], label = "Training " + name)
-            ax.plot(self.test_datas[name + 'x'], self.test_datas[name + 'y'], label = "Test " + name)
+        for n in self.names:
+            ax.plot(self.train_datas[n + 'x'], self.train_datas[n + 'y'], label = "Training " + n)
+            ax.plot(self.test_datas[n + 'x'], self.test_datas[n + 'y'], label = "Test " + n)
 
         ax.set_yscale('log')
         ax.legend()

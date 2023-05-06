@@ -18,6 +18,7 @@ from models_base import *
 from torch import Tensor
 from load import load_spacing
 from derivative import laplacian
+from models_base import Dataset
 
 __all__ = (
     "TrainingError",
@@ -25,7 +26,8 @@ __all__ = (
     "Dataset",
     "LinearModel",
     "GaussianModel",
-    "LinearLinearInformedModel",
+    "ElectronDensityInformedModel",
+    "SpaceChargeInformedModel",
     "PoissonNNModel",
     "SymmetricNNModel"
 )
@@ -56,7 +58,7 @@ class GaussianModel(Model):
         ypred = model.predict(xt)
         return Dataset(torch.as_tensor(ypred))
 
-class LinearLinearInformedModel(Model):
+class ElectronDensityInformedModel(Model):
     """Two-layer informed model by electron density. This describes the linear-linear model
     where we try to use a two-layer model to first predict e density and use e density 
     and x to predict the other data"""
@@ -64,8 +66,8 @@ class LinearLinearInformedModel(Model):
         # Heuristically edensity only works the same as edensity + space charge
         edensity = self.informed["edensity"]
         xt = xtrain + xtrain.square() + xtrain.exp()
-        model_x_ed = self.model_1.fit(xt, edensity)
-        model_xed_y = self.model_2.fit(xtrain + edensity, ytrain)
+        model_x_ed = LinearModel().fit(xt, edensity)
+        model_xed_y = LinearModel().fit(xtrain + edensity, ytrain)
         return model_x_ed, model_xed_y
     
     def predict_logic(self, model: tuple[Model, Model], xtest: Dataset) -> Dataset:
@@ -75,6 +77,25 @@ class LinearLinearInformedModel(Model):
         ypred = model_xed_y.predict(xtest + edensity)
         return ypred
     
+class SpaceChargeInformedModel(Model):
+    """Two-layer informed model by space charge. This describes the linear-linear model
+    where we try to use a two-layer model to first predict e density and use e density 
+    and x to predict the other data"""
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset):
+        # Heuristically edensity only works the same as edensity + space charge
+        edensity = self.informed["spacecharge"]
+        xt = xtrain + xtrain.square() + xtrain.exp()
+        model_x_ed = LinearModel().fit(xt, edensity)
+        model_xed_y = LinearModel().fit(xtrain + edensity, ytrain)
+        return model_x_ed, model_xed_y
+    
+    def predict_logic(self, model: tuple[Model, Model], xtest: Dataset) -> Dataset:
+        model_x_ed, model_xed_y = model
+        xt = xtest + xtest.square() + xtest.exp()
+        edensity = model_x_ed.predict(xt)
+        ypred = model_xed_y.predict(xtest + edensity)
+        return ypred
+
 class PoissonNN(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -178,7 +199,7 @@ class PoissonNNModel(NeuralNetModel):
             history.test(float(test_poi)/len(xtest), "Poisson loss")
 
             # Print logs if necessary
-            log = f"Trained {i} epochs on {self.name} with train loss {train_mse + train_poi}, test_loss {test_poi + test_mse}"
+            log = f"Trained {i + 1} epochs on {self.name} with train loss {train_mse + train_poi}, test_loss {test_poi + test_mse}"
             self._logs.append(log)
             if verbose:
                 print(log)
@@ -211,7 +232,7 @@ class SymetricNN(nn.Module):
             nn.Sigmoid(),
             nn.Linear(10, 100),
             nn.Sigmoid(),
-            nn.Linear(100, 17 * 69),
+            nn.Linear(100, 17 * 72),
             nn.Sigmoid()
         )
         self.x_spacing = load_spacing()[0]
@@ -219,13 +240,13 @@ class SymetricNN(nn.Module):
 
     def forward(self, x: torch.Tensor):
         x = self.fc(x)
-        x = x.reshape(-1, 69, 17)
+        x = x.reshape(-1, 72, 17)
         total = 0.077976
         
         target = torch.zeros(x.shape[0], 129, 17).to(self.device)
-        target[:, :69, :] = x
+        target[:, :72, :] = x
 
-        for j in range(70, 129):
+        for j in range(72, 129):
             x_pos = total - self.x_spacing[j]
 
             # Use normal flip near the edges
@@ -294,7 +315,7 @@ class SymmetricNNModel(NeuralNetModel):
             history.test(float(test_mse)/len(xtest), "MSE loss")
 
             # Print logs if necessary
-            log = f"Trained {i} epochs with train loss {train_mse}, test_loss {test_mse}"
+            log = f"Trained {i + 1} epochs with train loss {train_mse}, test_loss {test_mse}"
             self._logs.append(log)
             if verbose:
                 print(log)
@@ -318,3 +339,5 @@ class SymmetricNNModel(NeuralNetModel):
             for log in self._logs:
                 f.write(log)
                 f.write("\n")
+
+# Since we can replicate the poisson loss, can we try to make an initial prediction and nudge the result until it satisfies the poisson equation?

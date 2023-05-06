@@ -4,6 +4,7 @@ from load import *
 from dataclasses import dataclass
 import multiprocessing as mp
 from anim import make_plots
+from multiprocessing import Pool
 
 # Root path to store all the data
 ROOT = "./Datas/Week 6"
@@ -19,6 +20,7 @@ class TrainingIndex:
     
 def train(model: Model, idx: TrainingIndex, root: str):
     # Get the datas
+    print(f"Starting training for {model.name} on {idx.name}")
     vg = Dataset(np.arange(101).reshape(101, 1) / 100 * 0.0075)
     potential = Dataset(load_elec_potential())
     edensity = Dataset(load_e_density())
@@ -62,16 +64,14 @@ def train(model: Model, idx: TrainingIndex, root: str):
 def test_model(model: Model, training_idxs: list[TrainingIndex]):
     # Create folder
     path = get_folder_directory(ROOT, model)
+    predictions = {}
 
-    # Train the model
-    if len(training_idxs) == 1:
-        name, pred = train(model, training_idxs[0], path)
-        predictions = {name: pred}
-    else:
-        with mp.Pool(processes = 4) as pool:
-            m = model.get_new()
-            results = pool.starmap(train, [(m, idx, path) for idx in training_idxs])
-            predictions = {k: v for k, v in filter(lambda x: x is not None, results)}
+    # Train model for each index
+    with Pool(processes=4) as pool:
+        results = pool.starmap(train, [(model, idx, path) for idx in training_idxs])
+        res = filter(lambda x:  x is not None, results)
+        for k, v in res:
+            predictions[k] = v
 
     # Create logs
     with open(f"{path}/logs.txt", "w", encoding="utf-8") as f:
@@ -99,22 +99,18 @@ def test_all_models(models: list[Model]):
         TrainingIndex("29 and 30 and 31", [29, 30, 31])
     ]
 
-    if len(models) == 1:
-        test_model(models[0], training_idxs)
-        return
-    
-    with mp.Pool(processes = 4) as pool:
-        pool.starmap(test_model, [(model, training_idxs) for model in models])
+    for model in models:
+        test_model(model, training_idxs)
 
 # Debug the model - only train it on first 5
 def debug_model(model: Model):
     path = get_folder_directory(ROOT, model)
-    predictions = train(model, TrainingIndex("First 20", range(20)), path)
-    if predictions is None:
+    pred = train(model, TrainingIndex("First 20", range(20)), path)
+    if pred is None:
         print("Encountered training error")
         return
     
-    predictions = {predictions[0]: predictions[1]}
+    predictions = {"First 20": pred[1]}
 
     with open(f"{path}/logs.txt", "w", encoding="utf-8") as f:
         f.write(model.logs)
@@ -123,4 +119,6 @@ def debug_model(model: Model):
     make_plots(path, None, ["First 20"])
     
 if __name__ == "__main__":
-    debug_model(SymmetricNNModel(epochs=50))
+    test_all_models([
+        SpaceChargeInformedModel()
+    ])
