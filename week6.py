@@ -119,6 +119,11 @@ def debug_model(model: Model):
     make_plots(path, None, ["First 20"])
     
 if __name__ == "__main__":
-    test_all_models([
-        SpaceChargeInformedModel()
-    ])
+    training_idxs = [
+        TrainingIndex("First 40", range(40)),
+        TrainingIndex("First 60", range(60)),
+        TrainingIndex("First 75", range(75)),
+        TrainingIndex("First 90", range(90)),
+    ]
+
+    test_model(PoissonNNModel(epochs=30), training_idxs)

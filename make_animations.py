@@ -26,10 +26,20 @@ RESULTS_TO_INCLUDE = [
     "40 to 60"
 ]
 
+def make_animations(path: str):
+    model_name = path.split("/")[-1]
+    for file_name in os.listdir(path):
+        if file_name.endswith('.gif'):
+            print(f"Skipping making animations for {model_name}")
+            return
+    print(f"Making animations for {model_name}")
+    make_plots(path, None, RESULTS_TO_INCLUDE)
+    print(f"Finished making animations for {model_name}")
+
 def main():
     paths = [f"{FOLDER_NAME}/{path}" for path in os.listdir(FOLDER_NAME)]
     with Pool(processes=8) as pool:
-        pool.starmap(make_plots, [(path, None, RESULTS_TO_INCLUDE) for path in paths])
+        pool.starmap(make_animations, [(path,) for path in paths])
 
 if __name__ == "__main__":
     main()

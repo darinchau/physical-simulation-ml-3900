@@ -155,6 +155,8 @@ class Dataset:
     
     # Gets the n data of each dataset. Does not create a clone
     def __getitem__(self, i: int | slice) -> Dataset:
+        if isinstance(i, int):
+            i = slice(i, i+1, None)
         new_datas = [d[i] for d in self.datas]
         dataset = Dataset(*new_datas)
         return dataset
@@ -439,6 +441,12 @@ def test():
         raise AssertionError("Should not be able to rewrap dg")
     except ValueError:
         pass
+
+    dc = da + db
+    dh = dc[1]
+    assert dh.shape == (1, (4,), (3,))
+    di = dc[1:3]
+    assert di.shape == (2, (4,), (3,))
 
     print("Tests passed")
 

@@ -29,7 +29,8 @@ __all__ = (
     "ElectronDensityInformedModel",
     "SpaceChargeInformedModel",
     "PoissonNNModel",
-    "SymmetricNNModel"
+    "SymmetricNNModel",
+    "StochasticLSTMModel"
 )
 
 ## For example this is how you can wrap around a linear model
@@ -340,4 +341,18 @@ class SymmetricNNModel(NeuralNetModel):
                 f.write(log)
                 f.write("\n")
 
-# Since we can replicate the poisson loss, can we try to make an initial prediction and nudge the result until it satisfies the poisson equation?
+# Since we can replicate the poisson loss, can we try to make an initial prediction and 
+# nudge the result until it satisfies the poisson equation?
+class StochasticLSTMModel(Model):
+    """First use Bayesian logic to predict outcome based on past N results, then try to nudge 
+    the results in different directions in the hopes that one day it satisfies the Poisson PDE"""
+    def __init__(self, use_past_n = 5):
+        self.N = use_past_n
+    
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        print(xtrain.shape)
+        print(ytrain.shape)
+        return LinearModel().fit(xtrain, ytrain)
+    
+    def predict_logic(self, model, xtest: Dataset) -> Dataset:
+        return model.predict(xtest)

@@ -68,10 +68,12 @@ def delete_folder_contents(folder_path):
             print(f"Failed to delete {file_path}. Reason: {e}")
 
 # Create a folder directory, and compare the logs - if we found a training with identical hyperparameters, append to that
+# root = "./Datas/Week 6"
 def get_folder_directory(root: str, model: Model):
-    # The base folder path
     folder_path = f"{root}/{model.name}"
+    return get_folder_directory_recursive(folder_path, model)
 
+def get_folder_directory_recursive(folder_path: str, model: Model):
     # If the module does not exist at all :)
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
