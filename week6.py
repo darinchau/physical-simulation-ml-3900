@@ -11,6 +11,8 @@ from trainer import Trainer
 ROOT = "./Datas/Week 6"
 
 if __name__ == "__main__":
+    # Trainer(ROOT).debug_model(LinearLSTMModel(), training_idx="25 to 35")
     Trainer(ROOT).test_all_models([
-        LinearLSTMModel()
+        LinearAugmentedModel(),
+        RidgeAugmentedModel()
     ])

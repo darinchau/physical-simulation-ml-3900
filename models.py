@@ -23,13 +23,14 @@ __all__ = (
     "Dataset",
     "ElectronDensityInformedModel",
     "GaussianModel",
+    "LinearAugmentedModel",
     "LinearLSTMModel",
     "LinearModel",
-    "LinearTimeSeriesModel",
     "Model",
     "ModelFactory",
     "PoissonNNModel",
     # "QuadraticLSTMModel",
+    "RidgeAugmentedModel",
     "RidgeModel",
     "SpaceChargeInformedModel",
     # "StochasticLSTMModel",
@@ -457,6 +458,46 @@ class LinearLSTMModel(TimeSeriesModel):
         new_y = Dataset(ytrain.datas[0].reshape(-1, 1))
 
         return RidgeModel().fit(new_x, new_y)
+    
+    def predict_logic(self, model: LinearModel, xtest: Dataset) -> Dataset:
+        N = self.N
+        # First use a Bayesian model to predict the next data based on the prev 4 data
+        last_N: Tensor = torch.stack([xtest.datas[i+1] for i in range(N)], axis = -1)
+        last_N = last_N.reshape(-1, N)
+        last_N = last_N.double()
+        
+        # Add back the voltage as the argument
+        vgs = xtest.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
+        vgs = vgs.reshape(-1, 1)
+
+        yshape = (len(xtest),) + self._yshape[1:]
+
+        new_x = Dataset(vgs, last_N)
+        ypred = model.predict(new_x)
+        ypred = Dataset(ypred.datas[0].view(yshape))
+        return ypred
+
+# Variations on the same theme above
+class LinearAugmentedLSTMModel(TimeSeriesModel):
+    """Use Bayesian logic to predict outcome based on past N results"""    
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        N = self.N
+        # First use a Bayesian model to predict the next data based on the prev 4 data
+        # Simultaneously damp the xtrain past values so that nothing goes out of hand
+        last_N: Tensor = torch.stack([xtrain.datas[i+1] for i in range(N)], axis = -1)
+        last_N = last_N.reshape(-1, N)
+        last_N = last_N.double()
+        
+        # Add back the voltage as the argument
+        vgs = xtrain.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
+        vgs = vgs.reshape(-1, 1)
+
+        self._yshape = ytrain.datas[0].shape
+
+        new_x = Dataset(vgs, last_N)
+        new_y = Dataset(ytrain.datas[0].reshape(-1, 1))
+
+        return RidgeAugmentedModel().fit(new_x, new_y)
     
     def predict_logic(self, model: LinearModel, xtest: Dataset) -> Dataset:
         N = self.N

@@ -60,6 +60,23 @@ def train(mf: ModelFactory, idx: TrainingIndex, root: str):
 
     return idx.name, np.array(ypred)
 
+TRAINING_IDXS = {
+    "First 5": TrainingIndex("First 5", range(5)),
+    "First 20": TrainingIndex("First 20", range(20)),
+    "First 30": TrainingIndex("First 30", range(30)),
+    "First 40": TrainingIndex("First 40", range(40)),
+    "First 60": TrainingIndex("First 60", range(60)),
+    "First 75": TrainingIndex("First 75", range(75)),
+    "First 90": TrainingIndex("First 90", range(90)),
+    "15 to 45": TrainingIndex("15 to 45", range(15, 45)),
+    "20 to 40": TrainingIndex("20 to 40", range(20, 40)),
+    "40 to 60": TrainingIndex("40 to 60", range(40, 60)),
+    "25 to 35": TrainingIndex("25 to 35", range(25, 35)),
+    "20 to 50": TrainingIndex("20 to 50", range(20, 50)),
+    "30 to 50": TrainingIndex("30 to 50", range(30, 50)),
+    "29 and 30 and 31": TrainingIndex("29 and 30 and 31", [29, 30, 31])
+}
+
 class Trainer:
     def __init__(self, root: str):
         self.root = root
@@ -93,39 +110,26 @@ class Trainer:
 
     # Test each model. If there is only one, then use sequential, otherwise parallel
     def test_all_models(self, models: list[ModelFactory], force_sequential: bool = False):
-        training_idxs = [
-            TrainingIndex("First 5", range(5)),
-            TrainingIndex("First 20", range(20)),
-            TrainingIndex("First 30", range(30)),
-            TrainingIndex("First 40", range(40)),
-            TrainingIndex("First 60", range(60)),
-            TrainingIndex("First 75", range(75)),
-            TrainingIndex("First 90", range(90)),
-            TrainingIndex("15 to 45", range(15, 45)),
-            TrainingIndex("20 to 40", range(20, 40)),
-            TrainingIndex("40 to 60", range(40, 60)),
-            TrainingIndex("25 to 35", range(25, 35)),
-            TrainingIndex("20 to 50", range(20, 50)),
-            TrainingIndex("30 to 50", range(30, 50)),
-            TrainingIndex("29 and 30 and 31", [29, 30, 31])
-        ]
-
+        training_idxs = [v for _, v in TRAINING_IDXS.items()]
         for model in models:
             self.test_model(model, training_idxs, force_sequential=force_sequential)
 
     # Debug the model - only train it on first 5
-    def debug_model(self, model: ModelFactory):
+    def debug_model(self, model: ModelFactory, training_idx: str = "20 to 40"):
+        if training_idx not in TRAINING_IDXS:
+            raise KeyError(f"Unknown training index: {training_idx}")
+        idx = TRAINING_IDXS[training_idx]
         path = get_folder_directory(self.root, model)
-        pred = train(model, TrainingIndex("20 to 40", range(20, 40)), path)
+        pred = train(model, idx, path)
         if pred is None:
             print("Encountered training error")
             return
         
-        predictions = {"20 to 40": pred[1]}
+        predictions = {training_idx: pred[1]}
 
         with open(f"{path}/logs.txt", "w", encoding="utf-8") as f:
             f.write(model.logs)
         
         save_h5(predictions, f"{path}/predictions.h5")
-        make_plots(path, None, ["20 to 40"])
+        make_plots(path, None, [training_idx])
     

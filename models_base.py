@@ -47,7 +47,7 @@ class Dataset:
         for data in datas:
             if len(data.shape) == 1:
                 raise ValueError(f"The data must have at least two dimensions, since one-dimensional tensors are ambiguous. Found tensor of shape {data.shape}")
-            self.__data.append(torch.as_tensor(data).float())
+            self.__data.append(torch.as_tensor(data).double())
 
     # Overload print
     def __repr__(self):
@@ -144,10 +144,15 @@ class Dataset:
         return d
     
     def split_at(self, idxs: list[int]):
-        """Extracts the dataset at the specified indices."""
+        """Extracts the dataset at the specified indices. The order of data is preserved while the order of excluded_datas is not"""
         shape = self.shape
         flatten = self.to_tensor()
-        include_data = list(set(idxs))
+
+        # Remove duplicates
+        seen = set()
+        seen_add = seen.add
+        include_data =  [x for x in idxs if not (x in seen or seen_add(x))]
+
         data = Dataset(flatten[include_data])
         data.wrap_inplace((len(include_data),) + shape[1:])
 
@@ -505,6 +510,11 @@ class TimeSeriesModel(Model):
         diff = xt[1] - xt[0]
         data_diffs = torch.abs(xt[1:] - xt[:-1]) - diff
         if not torch.all(torch.abs(data_diffs) < 1e-7):
+            print(xt)
+            print(xt[1:])
+            print(xt[:-1])
+            print(torch.abs(data_diffs))
+            print(torch.max(torch.abs(data_diffs)))
             raise ValueError("Time series model has uneven spacing")
         
         fw_x = xtrain.clone()[N:]
