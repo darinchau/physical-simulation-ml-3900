@@ -13,6 +13,4 @@ ROOT = "./Datas/Week 6"
 if __name__ == "__main__":
     Trainer(ROOT).test_all_models([
         LinearLSTMModel(),
-        QuadraticLSTMModel(),
-        StochasticLSTMModel(use_past_n=3)
-    ])
+    ], force_sequential= True)

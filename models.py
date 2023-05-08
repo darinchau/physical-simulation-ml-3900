@@ -21,21 +21,21 @@ from derivative import laplacian
 from models_base import Dataset
 
 __all__ = (
-    "TrainingError",
+    "Dataset",
+    "ElectronDensityInformedModel",
+    "GaussianModel",
+    "LinearLSTMModel",
+    "LinearModel",
+    "LinearTimeSeriesModel",
     "Model",
     "ModelFactory",
-    "Dataset",
-    "LinearModel",
-    "GaussianModel",
-    "ElectronDensityInformedModel",
-    "SpaceChargeInformedModel",
     "PoissonNNModel",
+    # "QuadraticLSTMModel",
+    "SpaceChargeInformedModel",
+    # "StochasticLSTMModel",
     "SymmetricNNModel",
     "SymmetricPoissonModel",
-    "LinearTimeSeriesModel",
-    "StochasticLSTMModel",
-    "LinearLSTMModel",
-    "QuadraticLSTMModel"
+    "TrainingError",
 )
 
 ## For example this is how you can wrap around a linear model
@@ -409,54 +409,19 @@ class LinearTimeSeriesModel(TimeSeriesModel):
 # Since we can replicate the poisson loss, can we try to make an initial prediction and 
 # nudge the result until it satisfies the poisson equation?
 # This serves to be useful in a future model
-class StochasticLSTMModel(TimeSeriesModel):
-    """Use Bayesian logic to predict outcome based on past N results"""    
-    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
-        N = self.N
-        # First use a Bayesian model to predict the next data based on the prev 4 data
-        last_N = torch.stack([xtrain.datas[i+1] for i in range(N)], axis = -1)
-        last_N = last_N.reshape(-1, N)
-        
-        # Add back the voltage as the argument
-        vgs = xtrain.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
-        vgs = vgs.reshape(-1, 1)
-
-        new_x = Dataset(vgs, last_N)
-        new_y = Dataset(ytrain.datas[0].reshape(-1, 1))
-
-        return GaussianModel().fit(new_x, new_y)
-    
-    def predict_logic(self, model: GaussianModel, xtest: Dataset) -> Dataset:
-        N = self.N
-        # First use a Bayesian model to predict the next data based on the prev 4 data
-        last_N = torch.stack([xtest.datas[i+1] for i in range(N)], axis = -1)
-        last_N = last_N.reshape(-1, N)
-        
-        # Add back the voltage as the argument
-        vgs = xtest.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
-        vgs = vgs.reshape(-1, 1)
-
-        new_x = Dataset(vgs, last_N)
-        return model.predict(new_x)
-    
-    @property
-    def threads(self) -> int:
-        return 1
-
-# Since we can replicate the poisson loss, can we try to make an initial prediction and 
-# nudge the result until it satisfies the poisson equation?
-# This serves to be useful in a future model
 class LinearLSTMModel(TimeSeriesModel):
     """Use Bayesian logic to predict outcome based on past N results"""    
     def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
         N = self.N
         # First use a Bayesian model to predict the next data based on the prev 4 data
-        last_N = torch.stack([xtrain.datas[i+1] for i in range(N)], axis = -1)
+        last_N: Tensor = torch.stack([xtrain.datas[i+1] for i in range(N)], axis = -1)
         last_N = last_N.reshape(-1, N)
         
         # Add back the voltage as the argument
         vgs = xtrain.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
         vgs = vgs.reshape(-1, 1)
+
+        self._yshape = ytrain.datas[0].shape
 
         new_x = Dataset(vgs, last_N)
         new_y = Dataset(ytrain.datas[0].reshape(-1, 1))
@@ -466,52 +431,15 @@ class LinearLSTMModel(TimeSeriesModel):
     def predict_logic(self, model: LinearModel, xtest: Dataset) -> Dataset:
         N = self.N
         # First use a Bayesian model to predict the next data based on the prev 4 data
-        last_N = torch.stack([xtest.datas[i+1] for i in range(N)], axis = -1)
+        last_N: Tensor = torch.stack([xtest.datas[i+1] for i in range(N)], axis = -1)
         last_N = last_N.reshape(-1, N)
         
         # Add back the voltage as the argument
         vgs = xtest.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
         vgs = vgs.reshape(-1, 1)
 
-        new_x = Dataset(vgs, last_N)
-        return model.predict(new_x)
-
-
-# Since we can replicate the poisson loss, can we try to make an initial prediction and 
-# nudge the result until it satisfies the poisson equation?
-# This serves to be useful in a future model
-class QuadraticLSTMModel(TimeSeriesModel):
-    """Use Bayesian logic to predict outcome based on past N results"""    
-    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
-        N = self.N
-        # First use a Bayesian model to predict the next data based on the prev 4 data
-        last_N = torch.stack([xtrain.datas[i+1] for i in range(N)], axis = -1)
-        last_N = last_N.reshape(-1, N)
-        
-        # Add back the voltage as the argument
-        vgs = xtrain.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
-        vgs = vgs.reshape(-1, 1)
+        yshape = len(xtest) + self._yshape[1:]
 
         new_x = Dataset(vgs, last_N)
-        new_y = Dataset(ytrain.datas[0].reshape(-1, 1))
-
-        new_x = new_x.square()
-
-        return LinearModel().fit(new_x, new_y)
-    
-    def predict_logic(self, model: LinearModel, xtest: Dataset) -> Dataset:
-        N = self.N
-        # First use a Bayesian model to predict the next data based on the prev 4 data
-        last_N = torch.stack([xtest.datas[i+1] for i in range(N)], axis = -1)
-        last_N = last_N.reshape(-1, N)
-        
-        # Add back the voltage as the argument
-        vgs = xtest.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
-        vgs = vgs.reshape(-1, 1)
-
-        new_x = Dataset(vgs, last_N)
-        return model.predict(new_x)
-    
-    @property
-    def threads(self) -> int:
-        return 1
+        ypred = model.predict(new_x)
+        return ypred

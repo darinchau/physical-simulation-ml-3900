@@ -65,19 +65,19 @@ class Trainer:
         self.root = root
     
     # Puts a model to the test with the given training indices
-    def test_model(self, mf: ModelFactory, training_idxs: list[TrainingIndex]):
+    def test_model(self, mf: ModelFactory, training_idxs: list[TrainingIndex], force_sequential: bool = False):
         # Create folder
         path = get_folder_directory(self.root, mf)
         predictions = {}
 
         # Train model for each index
-        if mf.threads > 1:
-            with Pool(processes=mf.threads) as pool:
-                results = pool.starmap(train, [(mf, idx, path) for idx in training_idxs])
-        else:
+        if mf.threads == 1 or force_sequential:
             results = []
             for idx in training_idxs:
                 results.append(train(mf, idx, path))
+        else:
+            with Pool(processes=mf.threads) as pool:
+                results = pool.starmap(train, [(mf, idx, path) for idx in training_idxs])
         
         res = filter(lambda x:  x is not None, results)
         for k, v in res:
@@ -92,7 +92,7 @@ class Trainer:
         save_h5(predictions, f"{path}/predictions.h5")
 
     # Test each model. If there is only one, then use sequential, otherwise parallel
-    def test_all_models(self, models: list[ModelFactory]):
+    def test_all_models(self, models: list[ModelFactory], force_sequential: bool = False):
         training_idxs = [
             TrainingIndex("First 5", range(5)),
             TrainingIndex("First 20", range(20)),
@@ -111,7 +111,7 @@ class Trainer:
         ]
 
         for model in models:
-            self.test_model(model, training_idxs)
+            self.test_model(model, training_idxs, force_sequential=force_sequential)
 
     # Debug the model - only train it on first 5
     def debug_model(self, model: ModelFactory):

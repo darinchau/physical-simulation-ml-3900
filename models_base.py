@@ -315,7 +315,7 @@ class Model(ModelFactory):
     def _fit_inner(self, xtrain: Dataset, ytrain: Dataset) -> Any:
         return self.fit_logic(xtrain, ytrain)
     
-    # This is helpful for inheritance becausewe can only reimplement the inner logic of the prediction
+    # This is helpful for inheritance because we can only reimplement the inner logic of the prediction
     def _predict_inner(self, model, xtest: Dataset) -> Dataset:
         return self.predict_logic(model, xtest)
     
@@ -524,7 +524,8 @@ class TimeSeriesModel(Model):
             self._x += new_x
             for j in range(1, N+1):
                 new_x = new_x + self._y[-j]
-            self._y += self.predict_logic(fw, new_x)
+            ypred = self.predict_logic(fw, new_x)
+            self._y += ypred
 
         # Make predictions one by one
         predictions: list[Dataset] = []
