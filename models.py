@@ -23,6 +23,7 @@ from models_base import Dataset
 __all__ = (
     "TrainingError",
     "Model",
+    "ModelFactory",
     "Dataset",
     "LinearModel",
     "GaussianModel",
@@ -435,3 +436,7 @@ class StochasticLSTMModel(TimeSeriesModel):
 
         new_x = Dataset(vgs, last_N)
         return model.predict(new_x)
+    
+    @property
+    def threads(self) -> int:
+        return 2

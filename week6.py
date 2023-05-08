@@ -18,7 +18,7 @@ class TrainingIndex:
     def __iter__(self):
         return iter(self.indices)
     
-def train(model: Model, idx: TrainingIndex, root: str):
+def train(mf: ModelFactory, idx: TrainingIndex, root: str):
     # Get the datas
     print(f"Starting training for {model.name} on {idx.name}")
     vg = Dataset(np.arange(101).reshape(101, 1) / 100 * 0.75)
@@ -27,7 +27,7 @@ def train(model: Model, idx: TrainingIndex, root: str):
     space_charge = Dataset(load_space_charge())
 
     # Refresh the model
-    model = model.get_new(idx.name)
+    model = mf.get_new(idx.name)
 
     # Split out the training data
     xtrain, xtest = vg.split_at(idx)
@@ -61,28 +61,28 @@ def train(model: Model, idx: TrainingIndex, root: str):
     return idx.name, np.array(ypred)
 
 # Puts a model to the test with the given training indices
-def test_model(model: Model, training_idxs: list[TrainingIndex]):
+def test_model(mf: ModelFactory, training_idxs: list[TrainingIndex]):
     # Create folder
-    path = get_folder_directory(ROOT, model)
+    path = get_folder_directory(ROOT, mf)
     predictions = {}
 
     # Train model for each index
     with Pool(processes=4) as pool:
-        results = pool.starmap(train, [(model, idx, path) for idx in training_idxs])
+        results = pool.starmap(train, [(mf, idx, path) for idx in training_idxs])
         res = filter(lambda x:  x is not None, results)
         for k, v in res:
-            model.trained_on.append(k)
+            mf.trained_on.append(k)
             predictions[k] = v
 
     # Create logs
     with open(f"{path}/logs.txt", "w", encoding="utf-8") as f:
-        f.write(model.logs)
+        f.write(mf.logs)
 
     # Save predictions
     save_h5(predictions, f"{path}/predictions.h5")
 
 # Test each model. If there is only one, then use sequential, otherwise parallel
-def test_all_models(models: list[Model]):
+def test_all_models(models: list[ModelFactory]):
     training_idxs = [
         TrainingIndex("First 5", range(5)),
         TrainingIndex("First 20", range(20)),
@@ -104,7 +104,7 @@ def test_all_models(models: list[Model]):
         test_model(model, training_idxs)
 
 # Debug the model - only train it on first 5
-def debug_model(model: Model):
+def debug_model(model: ModelFactory):
     path = get_folder_directory(ROOT, model)
     pred = train(model, TrainingIndex("20 to 40", range(20, 40)), path)
     if pred is None:

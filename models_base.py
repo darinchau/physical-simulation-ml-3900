@@ -15,11 +15,14 @@ from sklearn.linear_model import LinearRegression
 
 # Filter all warnings
 import warnings
+
+from models_base import Model
 warnings.filterwarnings('ignore')
 
 __all__ = (
     "TrainingError",
     "Dataset",
+    "ModelFactory",
     "Model",
     "MultiModel",
     "History",
@@ -189,20 +192,12 @@ class Dataset:
         d = self.append(data)
         self.__data = d.datas
         return self
-
-class Model(ABC):
-    """Base class for all models. All models have a name, a fit method, and a predict method"""
-    @virtual
-    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
-        """The train logic of the model. Every model inherited from Model needs to implement this
-        This needs to return the model, which will be passed in the predict_logic method as an argument"""
-        raise NotImplementedError
     
-    @virtual
-    def predict_logic(self, model, xtest: Dataset) -> Dataset:
-        """The prediction logic of the model. Every model inherited from Model needs to implement this.
-        Takes in xtest and the model which will be exactly what the model has returned in fit_logic method"""
-        raise NotImplementedError
+class ModelFactory(ABC):
+    """A model maker. We have a get_new method on here which returns a model. Mostly this exists as
+    the OOP magic's way to make compiler checking more efficient and accurate"""
+    def __init__(self):
+        raise RuntimeError("Cannot initialize Model Factory on its own")
     
     @property
     def name(self) -> str:
@@ -235,10 +230,69 @@ class Model(ABC):
             self._trainedon = []
         return self._trainedon
 
+    # This and the __new__ method overload are required to make this python magic work
     def get_new(self, name: str) -> Model:
         """Return a fresh new instance of self with the same initialize arguments"""
         self.trained_on.append(name)
         return type(self)(*self._init_args, **self._init_kwargs)
+
+    @property
+    def max_num_features(self) -> int:
+        """The max number of features of the model. This is useful when we want to constrain the number of parameters. Default is 3 million"""
+        return 3000000
+    
+    @property
+    def min_training_data(self) -> int:
+        """The minimum number of training data required for the model. Default is 1"""
+        return 1
+    
+    @property
+    def model_structure(self) -> str:
+        """The model structure. Default is all the non-hidden properties of the class."""
+        st = ""
+        for k, v in self.__dict__.items():
+            if k[0] == "_":
+                continue
+            st += f"\n{k} = {str(v)}"
+        return st.strip()
+    
+    @property
+    def logs(self) -> str:
+        """Return a unique string that identifies a particular setup of a model"""
+        a = f"{self.name}\n\n{self.model_structure}"
+        if len(self.trained_on) > 0:
+            a += "\n\nTrained on:\n"
+            for t in self.trained_on:
+                a += f"\t{t}\n"
+        return a
+    
+    @property
+    def threads(self) -> int:
+        """The maximum number of threads this should run on. Default is 4. It is just mostly a 
+        suggestion but it reflects generally how much memory the training process uses
+        like if training involves something like O(n^3) process then better not run this on
+        too many threads"""
+        return 4
+
+# Model factory inherits from model because models can also give birth to new models
+# But a model factory's only purpose is to make models
+class Model(ModelFactory):
+    """Base class for all models. All models have a name, a fit method, and a predict method"""
+    @virtual
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        """The train logic of the model. Every model inherited from Model needs to implement this
+        This needs to return the model, which will be passed in the predict_logic method as an argument"""
+        raise NotImplementedError
+    
+    @virtual
+    def predict_logic(self, model, xtest: Dataset) -> Dataset:
+        """The prediction logic of the model. Every model inherited from Model needs to implement this.
+        Takes in xtest and the model which will be exactly what the model has returned in fit_logic method"""
+        raise NotImplementedError
+    
+    # This prevents initialization of model factories which is not allowed
+    def __init__(self):
+        pass
     
     @property
     def trained(self) -> bool:
@@ -312,36 +366,6 @@ class Model(ABC):
     def save(self, root: str, name: str):
         """Overload this if you want to save your models in the folder 'root'"""
         pass
-
-    @property
-    def max_num_features(self) -> int:
-        """The max number of features of the model. This is useful when we want to constrain the number of parameters. Default is 3 million"""
-        return 3000000
-    
-    @property
-    def min_training_data(self) -> int:
-        """The minimum number of training data required for the model. Default is 1"""
-        return 1
-    
-    @property
-    def model_structure(self) -> str:
-        """The model structure. Default is all the non-hidden properties of the class."""
-        st = ""
-        for k, v in self.__dict__.items():
-            if k[0] == "_":
-                continue
-            st += f"\n{k} = {str(v)}"
-        return st.strip()
-    
-    @property
-    def logs(self) -> str:
-        """Return a unique string that identifies a particular setup of a model"""
-        a = f"{self.name}\n\n{self.model_structure}"
-        if len(self.trained_on) > 0:
-            a += "\n\nTrained on:\n"
-            for t in self.trained_on:
-                a += f"\t{t}\n"
-        return a
 
 class MultiModel(Model):
     """A subclass of model where y is guaranteed to have one feature only in the implementation.
