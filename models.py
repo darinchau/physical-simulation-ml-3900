@@ -3,8 +3,7 @@
 
 from __future__ import annotations
 from typing import Any
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression, RidgeCV
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
 import numpy as np
@@ -31,6 +30,7 @@ __all__ = (
     "ModelFactory",
     "PoissonNNModel",
     # "QuadraticLSTMModel",
+    "RidgeModel",
     "SpaceChargeInformedModel",
     # "StochasticLSTMModel",
     "SymmetricNNModel",
@@ -44,6 +44,19 @@ class LinearModel(Model):
         xt = xtrain.to_tensor().cpu().numpy()
         yt = ytrain.to_tensor().cpu().numpy()
         return LinearRegression().fit(xt, yt)
+    
+    def predict_logic(self, model: LinearRegression, xtest: Dataset) -> Dataset:
+        xt = xtest.to_tensor().cpu().numpy()
+        ypred = model.predict(xt)
+        return Dataset(torch.as_tensor(ypred))
+    
+## For example this is how you can wrap around a ridge model
+class RidgeModel(Model):
+    """Uses the Ridge Cross Validation model"""
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset):
+        xt = xtrain.to_tensor().cpu().numpy()
+        yt = ytrain.to_tensor().cpu().numpy()
+        return RidgeCV().fit(xt, yt)
     
     def predict_logic(self, model: LinearRegression, xtest: Dataset) -> Dataset:
         xt = xtest.to_tensor().cpu().numpy()
@@ -63,6 +76,21 @@ class GaussianModel(Model):
         xt = xtest.to_tensor().cpu().numpy()
         ypred = model.predict(xt)
         return Dataset(torch.as_tensor(ypred))
+    
+# The augmented models
+class LinearAugmentedModel(AugmentedModel):
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        return LinearModel().fit(xtrain, ytrain)
+    
+    def predict_logic(self, model: LinearModel, xtest: Dataset) -> Dataset:
+        return model.predict(xtest)
+    
+class RidgeAugmentedModel(AugmentedModel):
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        return RidgeModel().fit(xtrain, ytrain)
+    
+    def predict_logic(self, model: RidgeModel, xtest: Dataset) -> Dataset:
+        return model.predict(xtest)
 
 class ElectronDensityInformedModel(Model):
     """Two-layer informed model by electron density. This describes the linear-linear model
@@ -414,8 +442,10 @@ class LinearLSTMModel(TimeSeriesModel):
     def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
         N = self.N
         # First use a Bayesian model to predict the next data based on the prev 4 data
+        # Simultaneously damp the xtrain past values so that nothing goes out of hand
         last_N: Tensor = torch.stack([xtrain.datas[i+1] for i in range(N)], axis = -1)
         last_N = last_N.reshape(-1, N)
+        last_N = last_N.double()
         
         # Add back the voltage as the argument
         vgs = xtrain.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
@@ -426,20 +456,22 @@ class LinearLSTMModel(TimeSeriesModel):
         new_x = Dataset(vgs, last_N)
         new_y = Dataset(ytrain.datas[0].reshape(-1, 1))
 
-        return LinearModel().fit(new_x, new_y)
+        return RidgeModel().fit(new_x, new_y)
     
     def predict_logic(self, model: LinearModel, xtest: Dataset) -> Dataset:
         N = self.N
         # First use a Bayesian model to predict the next data based on the prev 4 data
         last_N: Tensor = torch.stack([xtest.datas[i+1] for i in range(N)], axis = -1)
         last_N = last_N.reshape(-1, N)
+        last_N = last_N.double()
         
         # Add back the voltage as the argument
         vgs = xtest.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
         vgs = vgs.reshape(-1, 1)
 
-        yshape = len(xtest) + self._yshape[1:]
+        yshape = (len(xtest),) + self._yshape[1:]
 
         new_x = Dataset(vgs, last_N)
         ypred = model.predict(new_x)
+        ypred = Dataset(ypred.datas[0].view(yshape))
         return ypred

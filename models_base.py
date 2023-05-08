@@ -22,6 +22,7 @@ __all__ = (
     "Dataset",
     "ModelFactory",
     "Model",
+    "AugmentedModel",
     "MultiModel",
     "History",
     "NeuralNetModel",
@@ -364,6 +365,19 @@ class Model(ModelFactory):
     def save(self, root: str, name: str):
         """Overload this if you want to save your models in the folder 'root'"""
         pass
+
+class AugmentedModel(Model):
+    """Model but with data augmentation (square features and exponential features)"""
+    def _fit_inner(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        xtrain = xtrain + xtrain.exp()
+        xtrain = xtrain + xtrain.square()
+        return self.fit_logic(xtrain, ytrain)
+    
+    def _predict_inner(self, model, xtest: Dataset) -> Dataset:
+        xtest = xtest + xtest.exp()
+        xtest = xtest + xtest.square()
+        return self.predict_logic(model, xtest)
+        
 
 class MultiModel(Model):
     """A subclass of model where y is guaranteed to have one feature only in the implementation.

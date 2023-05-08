@@ -12,5 +12,5 @@ ROOT = "./Datas/Week 6"
 
 if __name__ == "__main__":
     Trainer(ROOT).test_all_models([
-        LinearLSTMModel(),
-    ], force_sequential= True)
+        LinearLSTMModel()
+    ])
