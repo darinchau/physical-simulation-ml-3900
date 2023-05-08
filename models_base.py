@@ -15,8 +15,6 @@ from sklearn.linear_model import LinearRegression
 
 # Filter all warnings
 import warnings
-
-from models_base import Model
 warnings.filterwarnings('ignore')
 
 __all__ = (

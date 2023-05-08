@@ -33,7 +33,9 @@ __all__ = (
     "SymmetricNNModel",
     "SymmetricPoissonModel",
     "LinearTimeSeriesModel",
-    "StochasticLSTMModel"
+    "StochasticLSTMModel",
+    "LinearLSTMModel",
+    "QuadraticLSTMModel"
 )
 
 ## For example this is how you can wrap around a linear model
@@ -439,4 +441,77 @@ class StochasticLSTMModel(TimeSeriesModel):
     
     @property
     def threads(self) -> int:
-        return 2
+        return 1
+
+# Since we can replicate the poisson loss, can we try to make an initial prediction and 
+# nudge the result until it satisfies the poisson equation?
+# This serves to be useful in a future model
+class LinearLSTMModel(TimeSeriesModel):
+    """Use Bayesian logic to predict outcome based on past N results"""    
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        N = self.N
+        # First use a Bayesian model to predict the next data based on the prev 4 data
+        last_N = torch.stack([xtrain.datas[i+1] for i in range(N)], axis = -1)
+        last_N = last_N.reshape(-1, N)
+        
+        # Add back the voltage as the argument
+        vgs = xtrain.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
+        vgs = vgs.reshape(-1, 1)
+
+        new_x = Dataset(vgs, last_N)
+        new_y = Dataset(ytrain.datas[0].reshape(-1, 1))
+
+        return LinearModel().fit(new_x, new_y)
+    
+    def predict_logic(self, model: LinearModel, xtest: Dataset) -> Dataset:
+        N = self.N
+        # First use a Bayesian model to predict the next data based on the prev 4 data
+        last_N = torch.stack([xtest.datas[i+1] for i in range(N)], axis = -1)
+        last_N = last_N.reshape(-1, N)
+        
+        # Add back the voltage as the argument
+        vgs = xtest.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
+        vgs = vgs.reshape(-1, 1)
+
+        new_x = Dataset(vgs, last_N)
+        return model.predict(new_x)
+
+
+# Since we can replicate the poisson loss, can we try to make an initial prediction and 
+# nudge the result until it satisfies the poisson equation?
+# This serves to be useful in a future model
+class QuadraticLSTMModel(TimeSeriesModel):
+    """Use Bayesian logic to predict outcome based on past N results"""    
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        N = self.N
+        # First use a Bayesian model to predict the next data based on the prev 4 data
+        last_N = torch.stack([xtrain.datas[i+1] for i in range(N)], axis = -1)
+        last_N = last_N.reshape(-1, N)
+        
+        # Add back the voltage as the argument
+        vgs = xtrain.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
+        vgs = vgs.reshape(-1, 1)
+
+        new_x = Dataset(vgs, last_N)
+        new_y = Dataset(ytrain.datas[0].reshape(-1, 1))
+
+        new_x = new_x.square()
+
+        return LinearModel().fit(new_x, new_y)
+    
+    def predict_logic(self, model: LinearModel, xtest: Dataset) -> Dataset:
+        N = self.N
+        # First use a Bayesian model to predict the next data based on the prev 4 data
+        last_N = torch.stack([xtest.datas[i+1] for i in range(N)], axis = -1)
+        last_N = last_N.reshape(-1, N)
+        
+        # Add back the voltage as the argument
+        vgs = xtest.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
+        vgs = vgs.reshape(-1, 1)
+
+        new_x = Dataset(vgs, last_N)
+        return model.predict(new_x)
+    
+    @property
+    def threads(self) -> int:
+        return 1
