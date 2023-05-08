@@ -30,6 +30,7 @@ __all__ = (
     "SpaceChargeInformedModel",
     "PoissonNNModel",
     "SymmetricNNModel",
+    "LinearTimeSeriesModel",
     "StochasticLSTMModel"
 )
 
@@ -129,7 +130,16 @@ class PoissonLoss(nn.Module):
         ep = x.reshape(-1, 129, 17)
         sc = space_charge.reshape(-1, 129, 17) * -q
         ys = (1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15)
-        lapla = laplacian(ep, torch.zeros_like(ep).to(self.device), self.x, self.y)
+        # Currently assumed that only silicon is everywhere
+        # Later, will need to adjust for the silicon-oxide interface
+        relative_permittivity_silicon = 11.7
+        
+        # Convert free space permittivity to F/cm
+        e0_cm = (8.85418782e-12) / 100
+        
+        # Actual dielectric permittivity = permittivity of free space * permittivity of material
+        eps = torch.fill(torch.zeros_like(ep[:1]), e0_cm * relative_permittivity_silicon)
+        lapla = laplacian(ep, torch.zeros_like(ep).to(self.device), eps, self.x, self.y)
         rmse = torch.sqrt(torch.mean((sc[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2))
         return rmse
 
@@ -206,24 +216,7 @@ class PoissonNNModel(NeuralNetModel):
                 print(log)
         
         # Save one's history somewhere
-        self._history = history
-        self._net = net
-        return net
-    
-    def predict_logic(self, model: nn.Module, xtest: Dataset) -> Dataset:
-        xt = xtest.to_tensor().to(self._device)
-        output = model(xt)
-        return Dataset(output)
-    
-    def save(self, root: str, name: str):
-        self._history.plot(root, name)
-        model_scripted = torch.jit.script(self._net)
-        model_scripted.save(f'{root}/{name}.pt')
-
-        with open(f"{root}/{name} history.txt", 'w') as f:
-            for log in self._logs:
-                f.write(log)
-                f.write("\n")
+        return net, history
 
 class SymetricNN(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
@@ -320,38 +313,31 @@ class SymmetricNNModel(NeuralNetModel):
             self._logs.append(log)
             if verbose:
                 print(log)
-        
-        # Save one's history somewhere
-        self._history = history
-        self._net = net
-        return net
-    
-    def predict_logic(self, model: nn.Module, xtest: Dataset) -> Dataset:
-        xt = xtest.to_tensor().to(self._device)
-        output = model(xt)
-        return Dataset(output)
-    
-    def save(self, root: str, name: str):
-        self._history.plot(root, name)
-        model_scripted = torch.jit.script(self._net)
-        model_scripted.save(f'{root}/{name}.pt')
 
-        with open(f"{root}/{name} history.txt", 'w') as f:
-            for log in self._logs:
-                f.write(log)
-                f.write("\n")
+        return net, history
+    
+# This is a debug model for the Time series model
+class LinearTimeSeriesModel(TimeSeriesModel):
+    """A debug model"""
+    def __init__(self, i: int):
+        super().__init__()
+        self.i = i
+    
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        return LinearModel().fit(xtrain, ytrain)
+    
+    def predict_logic(self, model, xtest: Dataset) -> Dataset:
+        return model.predict(xtest)
 
 # Since we can replicate the poisson loss, can we try to make an initial prediction and 
 # nudge the result until it satisfies the poisson equation?
-class StochasticLSTMModel(Model):
+class StochasticLSTMModel(TimeSeriesModel):
     """First use Bayesian logic to predict outcome based on past N results, then try to nudge 
-    the results in different directions in the hopes that one day it satisfies the Poisson PDE"""
-    def __init__(self, use_past_n = 5):
-        self.N = use_past_n
-    
+    the results in different directions in the hopes that one day it satisfies the Poisson PDE"""    
     def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
-        print(xtrain.shape)
-        print(ytrain.shape)
+        # First use a Bayesian model to predict the next data based on the prev 4 data
+        print(xtrain.to_tensor().shape)
+        print(ytrain.to_tensor().shape)
         return LinearModel().fit(xtrain, ytrain)
     
     def predict_logic(self, model, xtest: Dataset) -> Dataset:

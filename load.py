@@ -87,16 +87,15 @@ def get_folder_directory_recursive(folder_path: str, model: Model):
         return folder_path
     
     # Find the logs file. If the logs have the same content we would have generated, then return the existing file path
-    if os.path.isfile(f"{folder_path}/logs.txt"):
-        with open(f"{folder_path}/logs.txt", 'r') as f:
-            st = f.read()
-        if st.strip() == model.logs.strip():
-            return folder_path
+    with open(f"{folder_path}/logs.txt", 'r') as f:
+        st = f.read()
+    if st.strip() == model.logs.strip():
+        return folder_path
     
     # Create something like Model (1), Model (2) and so on via recursion
     if '(' not in folder_path.split("/")[-1]:
-        return get_folder_directory(f"{folder_path} (1)", model)
+        return get_folder_directory_recursive(f"{folder_path} (1)", model)
     
     num = int(folder_path.split("(")[1][:-1])
     path = folder_path.split("(")[0][:-1]
-    return get_folder_directory(f"{path} ({num + 1})", model)
+    return get_folder_directory_recursive(f"{path} ({num + 1})", model)

@@ -21,13 +21,13 @@ class TrainingIndex:
 def train(model: Model, idx: TrainingIndex, root: str):
     # Get the datas
     print(f"Starting training for {model.name} on {idx.name}")
-    vg = Dataset(np.arange(101).reshape(101, 1) / 100 * 0.0075)
+    vg = Dataset(np.arange(101).reshape(101, 1) / 100 * 0.75)
     potential = Dataset(load_elec_potential())
     edensity = Dataset(load_e_density())
     space_charge = Dataset(load_space_charge())
 
     # Refresh the model
-    model = model.get_new()
+    model = model.get_new(idx.name)
 
     # Split out the training data
     xtrain, xtest = vg.split_at(idx)
@@ -71,6 +71,7 @@ def test_model(model: Model, training_idxs: list[TrainingIndex]):
         results = pool.starmap(train, [(model, idx, path) for idx in training_idxs])
         res = filter(lambda x:  x is not None, results)
         for k, v in res:
+            model.trained_on.append(k)
             predictions[k] = v
 
     # Create logs
@@ -105,25 +106,21 @@ def test_all_models(models: list[Model]):
 # Debug the model - only train it on first 5
 def debug_model(model: Model):
     path = get_folder_directory(ROOT, model)
-    pred = train(model, TrainingIndex("First 20", range(20)), path)
+    pred = train(model, TrainingIndex("20 to 40", range(20, 40)), path)
     if pred is None:
         print("Encountered training error")
         return
     
-    predictions = {"First 20": pred[1]}
+    predictions = {"20 to 40": pred[1]}
 
     with open(f"{path}/logs.txt", "w", encoding="utf-8") as f:
         f.write(model.logs)
     
     save_h5(predictions, f"{path}/predictions.h5")
-    make_plots(path, None, ["First 20"])
+    make_plots(path, None, ["20 to 40"])
     
 if __name__ == "__main__":
-    training_idxs = [
-        TrainingIndex("First 40", range(40)),
-        TrainingIndex("First 60", range(60)),
-        TrainingIndex("First 75", range(75)),
-        TrainingIndex("First 90", range(90)),
-    ]
-
-    test_model(PoissonNNModel(epochs=30), training_idxs)
+    test_all_models([
+        SymmetricNNModel(epochs = 100),
+        PoissonNNModel(epochs = 50)
+    ])

@@ -4,23 +4,14 @@ from anim import AnimationMaker, log_diff, DataVisualizer
 from load import load_spacing, load_elec_potential, load_space_charge
 
 # Wrapper around albert's function, without the division by -Q
-def laplacian(data, result, x, y):
+def laplacian(data, result, eps, x, y):
     """Calculate the LHS of poisson equation"""
     xr, yr, epr = x[1:-1].view(-1, 1), y[2:], data[:, 1:-1, 2:]
     xd, yd, epd = x[2:].view(-1, 1), y[1:-1], data[:, 2:, 1:-1]
     xc, yc, epc = x[1:-1].view(-1, 1), y[1:-1], data[:, 1:-1, 1:-1]
     xl, yl, epl = x[1:-1].view(-1, 1), y[:-2], data[:, 1:-1, :-2]
     xu, yu, epu = x[:-2].view(-1, 1), y[1:-1], data[:, :-2, 1:-1]
-            
-    # Currently assumed that only silicon is everywhere
-    # Later, will need to adjust for the silicon-oxide interface
-    relative_permittivity_silicon = 11.7
-    
-    # Convert free space permittivity to F/cm
-    e0_cm = (8.85418782e-12) / 100
-    
-    # Actual dielectric permittivity = permittivity of free space * permittivity of material
-    eps = torch.fill(torch.zeros_like(data[:1]), e0_cm * relative_permittivity_silicon)
+
     eps_r = eps[:, 1:-1, 2:]
     eps_d = eps[:, 2:, 1:-1]
     eps_c = eps[:, 1:-1, 1:-1]
@@ -43,7 +34,16 @@ def laplacian(data, result, x, y):
 def laplacian_all(data):
     x, y = load_spacing()
     result = torch.zeros_like(data)
-    return laplacian(data, result, x, y)
+    # Currently assumed that only silicon is everywhere
+    # Later, will need to adjust for the silicon-oxide interface
+    relative_permittivity_silicon = 11.7
+    
+    # Convert free space permittivity to F/cm
+    e0_cm = (8.85418782e-12) / 100
+    
+    # Actual dielectric permittivity = permittivity of free space * permittivity of material
+    eps = torch.fill(torch.zeros_like(data[:1]), e0_cm * relative_permittivity_silicon)
+    return laplacian(data, result, eps, x, y)
 
 def test():
     q = 1.60217663e-19

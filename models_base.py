@@ -11,6 +11,7 @@ import torch
 from torch import Tensor, nn
 from typing import Any
 import matplotlib.pyplot as plt
+from sklearn.linear_model import LinearRegression
 
 # Filter all warnings
 import warnings
@@ -22,7 +23,8 @@ __all__ = (
     "Model",
     "MultiModel",
     "History",
-    "NeuralNetModel"
+    "NeuralNetModel",
+    "TimeSeriesModel"
 )
 
 class TrainingError(Exception):
@@ -96,8 +98,7 @@ class Dataset:
     def clone(self) -> Dataset:
         d = Dataset(*[torch.clone(data) for data in self.datas])
         return d
-    
-    # __iter__ automatically flattens everything and yield it as a 1D tensor
+
     def to_tensor(self) -> Tensor:
         return torch.cat([d.reshape(self.num_datas, -1) for d in self.datas], axis = 1)
     
@@ -156,7 +157,10 @@ class Dataset:
     # Gets the n data of each dataset. Does not create a clone
     def __getitem__(self, i: int | slice) -> Dataset:
         if isinstance(i, int):
-            i = slice(i, i+1, None)
+            if i == -1:
+                i = slice(-1, None, None)
+            else:
+                i = slice(i, i+1, None)
         new_datas = [d[i] for d in self.datas]
         dataset = Dataset(*new_datas)
         return dataset
@@ -173,6 +177,18 @@ class Dataset:
         """Creates a new dataset with all the features taken exponents"""
         new_datas = [torch.exp(d) for d in self.datas]
         return Dataset(*new_datas)
+    
+    # Append new data
+    def append(self, data: Dataset) -> Dataset:
+        datas = []
+        for d1, d2 in zip(self.datas, data.datas):
+            datas.append(torch.cat([d1, d2], axis = 0))
+        return Dataset(*datas)
+    
+    def __iadd__(self, data: Dataset) -> Dataset:
+        d = self.append(data)
+        self.__data = d.datas
+        return self
 
 class Model(ABC):
     """Base class for all models. All models have a name, a fit method, and a predict method"""
@@ -211,9 +227,17 @@ class Model(ABC):
         self._init_args = args
         self._init_kwargs = kwargs
         return self
+    
+    @property
+    def trained_on(self) -> list[str]:
+        """A list of indices name where the model has been trained on"""
+        if not hasattr(self, "_trainedon"):
+            self._trainedon = []
+        return self._trainedon
 
-    def get_new(self) -> Model:
+    def get_new(self, name: str) -> Model:
         """Return a fresh new instance of self with the same initialize arguments"""
+        self.trained_on.append(name)
         return type(self)(*self._init_args, **self._init_kwargs)
     
     @property
@@ -312,7 +336,12 @@ class Model(ABC):
     @property
     def logs(self) -> str:
         """Return a unique string that identifies a particular setup of a model"""
-        return f"{self.name}\n\n{self.model_structure}"
+        a = f"{self.name}\n\n{self.model_structure}"
+        if len(self.trained_on) > 0:
+            a += "\n\nTrained on:\n"
+            for t in self.trained_on:
+                a += f"\t{t}\n"
+        return a
 
 class MultiModel(Model):
     """A subclass of model where y is guaranteed to have one feature only in the implementation.
@@ -381,11 +410,13 @@ class History:
 class NeuralNetModel(Model):
     """A model except we expose the epochs argument for you, and turn on/off torch grad whenever necessary."""
     @virtual
-    def fit_logic(self, xtrain: Dataset, ytrain: Dataset, epochs: int = 50, verbose: bool = True) -> Any:
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset, epochs: int = 50, verbose: bool = True) -> tuple[nn.Module, History]:
+        """This should return (neural net, history object)"""
         raise NotImplementedError
     
     def _fit_inner(self, xtrain: Dataset, ytrain: Dataset):
-        return self.fit_logic(xtrain, ytrain, self.epochs, self._verbose)
+        self._net, self._history = self.fit_logic(xtrain, ytrain, self.epochs, self._verbose)
+        return self._net
 
     def _predict_inner(self, model, xtest: Dataset) -> Dataset:
         with torch.no_grad():
@@ -397,6 +428,122 @@ class NeuralNetModel(Model):
         self.epochs = epochs
         self._verbose = verbose
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def predict_logic(self, model: nn.Module, xtest: Dataset) -> Dataset:
+        xt = xtest.to_tensor().to(self._device)
+        output = model(xt)
+        return Dataset(output)
+    
+    def save(self, root: str, name: str):
+        self._history.plot(root, name)
+        model_scripted = torch.jit.script(self._net)
+        model_scripted.save(f'{root}/{name}.pt')
+
+        with open(f"{root}/{name} history.txt", 'w') as f:
+            if hasattr(self, "_logs"):
+                for log in self._logs:
+                    f.write(log)
+                    f.write("\n")
+
+class TimeSeriesModel(Model):
+    def __init__(self, use_past_n = 5):
+        if use_past_n < 2:
+            raise TrainingError("Use a minimum of 2 things")
+        self.N = use_past_n
+    
+    # Let's make it only work on one-dimensional data because I don't know the best way to make it work on multidimensional data
+    # To future me: This assumes datas are sorted and evenly spaced
+    def _fit_inner(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        N = self.N
+
+        # Check if there is actually enough data to perform LSTM
+        if len(xtrain) < N:
+            raise TrainingError("Not enough data")
+        
+        # Check if data is one dimensional
+        if xtrain.shape[1][0] != 1:
+            raise ValueError("Currently, Time series model abstract class only works on one-dimensional data, which is the time")
+        
+        # Check if data is evenly spaced. This depends on the fact that use-last-n requires a minimum of 2
+        xt = xtrain.to_tensor().view(-1)
+        diff = xt[1] - xt[0]
+        data_diffs = torch.abs(xt[1:] - xt[:-1]) - diff
+        if not torch.all(torch.abs(data_diffs) < 1e-7):
+            raise ValueError("Time series model has uneven spacing")
+        
+        fw_x = xtrain.clone()[N:]
+        for i in range(1, N+1):
+            fw_x = fw_x + ytrain[N-i:-i]
+        fw_y = ytrain.clone()[N:]
+        fw = self.fit_logic(fw_x, fw_y)
+
+        self._x = xtrain.clone()
+        self._y = ytrain.clone()
+
+        # Fit an extra linear component to predict everything before
+        xt = xtrain.to_tensor().cpu().numpy()
+        yt = ytrain.to_tensor().cpu().numpy()
+        linear = LinearRegression().fit(xt, yt)
+        return fw, linear
+    
+    def _predict_inner(self, model, xtest: Dataset) -> Dataset:
+        N = self.N
+        fw, linear = model
+        assert isinstance(linear, LinearRegression)
+
+        # Predict until cover the whole range in time steps
+        diff = self._x.datas[0][1] - self._x.datas[0][0]
+        xt_tensor = xtest.to_tensor()
+        furthest_time_step = torch.max(xt_tensor)
+        next_x = self._x.datas[0][-1][0]
+        while next_x < furthest_time_step:
+            next_x = next_x + diff
+            new_x = Dataset(torch.tensor([[next_x]]))
+            self._x += new_x
+            for j in range(1, N+1):
+                new_x = new_x + self._y[-j]
+            self._y += self.predict_logic(fw, new_x)
+
+        # Make predictions one by one
+        predictions: list[Dataset] = []
+        sorted_tensor, indices = torch.sort(self._x.datas[0][:, 0])
+        sorted_tensor = sorted_tensor.reshape(-1)
+        for i in range(len(xtest)):
+            xi = xtest[i]
+            x = xi.datas[0][0][0]
+
+            # Case 1: smaller than everything in x
+            x_min = torch.min(self._x.datas[0])
+            if x < x_min:
+                ypred = Dataset(linear.predict(xi.to_tensor().cpu().numpy()))
+                predictions.append(ypred)
+                continue
+
+            # Case 2: in between something in x
+            index_left = torch.searchsorted(sorted_tensor, x, right=False)
+            index_right = torch.searchsorted(sorted_tensor, x, right=True)
+            left, right = indices[index_left], indices[index_right]
+            if left == right:
+                ypred = Dataset(self._y.datas[0][left].reshape(1, -1))
+                predictions.append(ypred)
+                continue
+            
+            # predict the result linearly
+            new_xtrain = self._x.datas[0][(left, right), :].cpu().numpy().reshape(2, -1)
+            new_ytrain = self._y.datas[0][(left, right), :].cpu().numpy().reshape(2, -1)
+            lin = Linear().fit(new_xtrain, new_ytrain)
+            ypred = Dataset(lin.predict(np.array([[x]])))
+            predictions.append(ypred)
+        
+        # Return the predictions
+        if len(predictions) == 1:
+            return predictions[0]
+        
+        d = predictions[0]
+        for i in range(1, len(predictions)):
+            d += predictions[i]
+        return d
+        
 
 # Tests
 def test():
