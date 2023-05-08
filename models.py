@@ -30,6 +30,7 @@ __all__ = (
     "SpaceChargeInformedModel",
     "PoissonNNModel",
     "SymmetricNNModel",
+    "SymmetricPoissonModel",
     "LinearTimeSeriesModel",
     "StochasticLSTMModel"
 )
@@ -218,7 +219,7 @@ class PoissonNNModel(NeuralNetModel):
         # Save one's history somewhere
         return net, history
 
-class SymetricNN(nn.Module):
+class SymmetricNN(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.fc = nn.Sequential(
@@ -232,10 +233,10 @@ class SymetricNN(nn.Module):
         self.x_spacing = load_spacing()[0]
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: Tensor):
         x = self.fc(x)
         x = x.reshape(-1, 72, 17)
-        total = 0.077976
+        total = 0.078
         
         target = torch.zeros(x.shape[0], 129, 17).to(self.device)
         target[:, :72, :] = x
@@ -266,7 +267,7 @@ class SymmetricNNModel(NeuralNetModel):
         xtrain = xtrain.to_tensor().to(device)
         ytrain = ytrain.to_tensor().to(device)
 
-        net = SymetricNN().to(device)
+        net = SymmetricNN().to(device)
         optimizer = optim.LBFGS(net.parameters(), lr=0.01)
         criterion = nn.MSELoss()
 
@@ -314,6 +315,79 @@ class SymmetricNNModel(NeuralNetModel):
             if verbose:
                 print(log)
 
+        return net, history
+    
+# Mix symmetric and Poisson
+class SymmetricPoissonModel(NeuralNetModel):
+    """PoissonNN, but using the symmetric model"""
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset, epochs: int, verbose: bool = True) -> Any:
+        device = self._device
+        xtest = self.informed["xtest"].to_tensor().to(device)
+        ytest = self.informed["ytest"].to_tensor().to(device)
+        sctrain = self.informed["spacecharge"].to_tensor().to(device)
+        sctest = self.informed["spacecharge-test"].to_tensor().to(device)
+        xtrain = xtrain.to_tensor().to(device)
+        ytrain = ytrain.to_tensor().to(device)
+
+        net = SymmetricNN().to(device)
+        optimizer = optim.LBFGS(net.parameters(), lr=0.01)
+        criterion1 = nn.MSELoss()
+        criterion2 = PoissonLoss()
+
+        history = History()
+        self._logs = []
+
+        # Batch size is 1 for us so better use this approach instead
+        for i in range(epochs):
+            # Update the history
+            history.update()
+
+            # Train loop
+            train_mse, train_poi = 0., 0.
+            for (x, y, sc) in zip(xtrain, ytrain, sctrain):
+                def closure():
+                    nonlocal train_mse
+                    nonlocal train_poi
+                    if torch.is_grad_enabled():
+                        optimizer.zero_grad()
+                    ypred = net(x)
+                    mse = criterion1(ypred, y)
+                    poissonloss = criterion2(ypred, sc)
+                    loss = mse + poissonloss
+                    if loss.requires_grad:
+                        loss.backward()
+                    train_mse += mse.item()
+                    train_poi += poissonloss.item()
+                    return loss
+                optimizer.step(closure)
+
+            history.train(float(train_mse)/len(xtrain), "MSE loss")
+            history.train(float(train_poi)/len(xtrain), "Poisson loss")
+
+            # Only test every 10 times
+            if i % 10 < 9:
+                continue
+            
+            # Test loop
+            test_mse, test_poi = 0., 0.
+            with torch.no_grad():
+                for (x, y, sc) in zip(xtest, ytest, sctest):
+                    ypred = net(x)
+                    mse = criterion1(ypred, y)
+                    poissonloss = criterion2(ypred, sc)
+                    loss = mse + poissonloss
+                    test_mse += mse.item()
+                    test_poi += poissonloss.item()
+            history.test(float(test_mse)/len(xtest), "MSE loss")
+            history.test(float(test_poi)/len(xtest), "Poisson loss")
+
+            # Print logs if necessary
+            log = f"Trained {i + 1} epochs on {self.name} with train loss {train_mse + train_poi}, test_loss {test_poi + test_mse}"
+            self._logs.append(log)
+            if verbose:
+                print(log)
+        
+        # Save one's history somewhere
         return net, history
     
 # This is a debug model for the Time series model
