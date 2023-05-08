@@ -11,8 +11,19 @@ from trainer import Trainer
 ROOT = "./Datas/Week 6"
 
 if __name__ == "__main__":
-    # Trainer(ROOT).debug_model(LinearLSTMModel(), training_idx="25 to 35")
+    # Trainer(ROOT).test_all_models([
+    #     LinearAugmentedModel(),
+    #     LinearAugmentedLSTMModel(),
+    #     LinearLSTMModel(),
+    #     RidgeAugmentedModel(),
+    # ])
+
+    # Trainer(ROOT).test_all_models([
+    #     BayesianRegressionModel(),
+    #     StochasticLSTMModel(use_past_n=5),
+    # ])
+
     Trainer(ROOT).test_all_models([
-        LinearAugmentedLSTMModel(),
-        StochasticLSTMModel(),
+        PoissonNNModel(epochs=200),
+        SymmetricPoissonModel(epochs=200)
     ])

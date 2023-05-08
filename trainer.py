@@ -45,13 +45,11 @@ def train(mf: ModelFactory, idx: TrainingIndex, root: str):
     # Train the model
     try:
         model.fit(xtrain, ytrain)
+        ypred = model.predict(vg).to_tensor().cpu().numpy().reshape(101, 129, 17)
     except TrainingError as e:
         print(f"Aborting training for {mf.name} on {idx.name} - {e}")
         return None
     
-    # Test the model
-    ypred = model.predict(vg).to_tensor().cpu().numpy().reshape(101, 129, 17)
-
     # Save the model
     model.save(root, idx.name)
 

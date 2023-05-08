@@ -175,14 +175,15 @@ class Dataset:
     # Methods to augment dataset
     def square(self):
         """Creates a new dataset with squared features."""
+        # This produces all terms "up to" degree 2 - which means we have xy, x^2y, xy^2, x^2y^2
         poly = PolynomialFeatures(2)
         new_data = poly.fit_transform(self.to_tensor().cpu().numpy())
         new_t = torch.tensor(new_data)
         return Dataset(new_t)
 
-    def exp(self):
-        """Creates a new dataset with all the features taken exponents"""
-        new_datas = [torch.exp(d) for d in self.datas]
+    def nexp(self):
+        """Creates a new dataset with all the features taken exponents. This gives e^-x to avoid exploding coefficients"""
+        new_datas = [torch.exp(-d) for d in self.datas]
         return Dataset(*new_datas)
     
     # Append new data
@@ -280,6 +281,9 @@ class ModelFactory(ABC):
 
 # Model factory inherits from model because models can also give birth to new models
 # But a model factory's only purpose is to make models
+# The call hierachy for any model is:
+#   fit -> _fit_inner -> base._fit_inner -> ... -> (Model)._fit_inner -> fit_logic
+# This means now multiinheritance is possible
 class Model(ModelFactory):
     """Base class for all models. All models have a name, a fit method, and a predict method"""
     @virtual
@@ -338,6 +342,7 @@ class Model(ModelFactory):
         except ValueError as e:
             if f"{e}".startswith("Input X contains infinity"):
                 raise TrainingError("Caught exploding coefficients during training")
+            raise e
 
         self._ytrain_shape = ytrain.shape
         self._xtrain_shape = xtrain.shape
@@ -356,7 +361,12 @@ class Model(ModelFactory):
         
         # Prediction
         self._testing = True
-        ypred = self._predict_inner(self._model, xtest)
+        try:
+            ypred = self._predict_inner(self._model, xtest)
+        except ValueError as e:
+            if f"{e}".startswith("Input X contains infinity"):
+                raise TrainingError("Caught exploding coefficients during training")
+            raise e
         self._testing = False
 
         # Sanity checks
@@ -378,35 +388,35 @@ class Model(ModelFactory):
 class AugmentedModel(Model):
     """Model but with data augmentation (square features and exponential features)"""
     def _fit_inner(self, xtrain: Dataset, ytrain: Dataset) -> Any:
-        xtrain = xtrain + xtrain.exp()
+        xtrain = xtrain + xtrain.nexp()
         xtrain = xtrain + xtrain.square()
-        return self.fit_logic(xtrain, ytrain)
+        return super()._fit_inner(xtrain, ytrain)
     
     def _predict_inner(self, model, xtest: Dataset) -> Dataset:
-        xtest = xtest + xtest.exp()
+        xtest = xtest + xtest.nexp()
         xtest = xtest + xtest.square()
-        return self.predict_logic(model, xtest)
+        return super()._predict_inner(model, xtest)
         
 
 class MultiModel(Model):
     """A subclass of model where y is guaranteed to have one feature only in the implementation.
     This assumes every feature is independent and thus we can predict each model separately"""
     def _fit_inner(self, xtrain: Dataset, ytrain: Dataset) -> Any:
-        xt = xtrain.to_tensor()
         yt = ytrain.to_tensor()
         num_tasks = yt.shape[1]
         models = [None] * num_tasks
         for i in range(num_tasks):
-            models[i] = self.fit_logic(xt, yt[:, i])
+            yt_i = Dataset(yt[:, i:i+1])
+            models[i] = super()._fit_inner(xtrain, yt_i)
         return models
     
     def _predict_inner(self, model, xtest: Dataset) -> Dataset:
-        xt = xtest.to_tensor()
         num_tasks = len(model)
-        yp = torch.zeros(xt.shape[0], num_tasks)
+        yp = torch.zeros(len(xtest), num_tasks)
         for i in range(num_tasks):
-            yp[:, i] = self.predict_logic(model[i], xt)
-        return yp
+            ypred_i = super()._predict_inner(model[i], xtest).to_tensor()
+            yp[:, i:i+1] = ypred_i
+        return Dataset(yp)
     
 class History:
     """A helper class to plot the history of training"""
@@ -453,7 +463,8 @@ class History:
         fig.savefig(f"{root}/{name} training loss.png")
 
 class NeuralNetModel(Model):
-    """A model except we expose the epochs argument for you, and turn on/off torch grad whenever necessary."""
+    """A model except we expose the epochs argument for you, and turn on/off torch grad whenever necessary.
+    NeuralNetModel must be at the base of multiinheritance hierachies"""
     @virtual
     def fit_logic(self, xtrain: Dataset, ytrain: Dataset, epochs: int = 50, verbose: bool = True) -> tuple[nn.Module, History]:
         """This should return (neural net, history object)"""
@@ -465,7 +476,7 @@ class NeuralNetModel(Model):
 
     def _predict_inner(self, model, xtest: Dataset) -> Dataset:
         with torch.no_grad():
-            ypred = self.predict_logic(model, xtest)
+            ypred = super()._predict_inner(model, xtest)
         return ypred
     
     def __init__(self, epochs: int, verbose: bool = True):
@@ -525,7 +536,7 @@ class TimeSeriesModel(Model):
         for i in range(1, N+1):
             fw_x = fw_x + ytrain[N-i:-i]
         fw_y = ytrain.clone()[N:]
-        fw = self.fit_logic(fw_x, fw_y)
+        fw = super()._fit_inner(fw_x, fw_y)
 
         self._x = xtrain.clone()
         self._y = ytrain.clone()
@@ -552,7 +563,7 @@ class TimeSeriesModel(Model):
             self._x += new_x
             for j in range(1, N+1):
                 new_x = new_x + self._y[-j]
-            ypred = self.predict_logic(fw, new_x)
+            ypred = super()._predict_inner(fw, new_x)
             self._y += ypred
 
         # Make predictions one by one

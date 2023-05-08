@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 from typing import Any
-from sklearn.linear_model import LinearRegression, RidgeCV
+from sklearn.linear_model import LinearRegression, RidgeCV, ARDRegression
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
 import numpy as np
@@ -20,6 +20,7 @@ from derivative import laplacian
 from models_base import Dataset
 
 __all__ = (
+    "BayesianRegressionModel",
     "Dataset",
     "ElectronDensityInformedModel",
     "GaussianModel",
@@ -79,19 +80,11 @@ class GaussianModel(Model):
         return Dataset(torch.as_tensor(ypred))
     
 # The augmented models
-class LinearAugmentedModel(AugmentedModel):
-    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
-        return LinearModel().fit(xtrain, ytrain)
+class LinearAugmentedModel(AugmentedModel, LinearModel):
+    pass
     
-    def predict_logic(self, model: LinearModel, xtest: Dataset) -> Dataset:
-        return model.predict(xtest)
-    
-class RidgeAugmentedModel(AugmentedModel):
-    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
-        return RidgeModel().fit(xtrain, ytrain)
-    
-    def predict_logic(self, model: RidgeModel, xtest: Dataset) -> Dataset:
-        return model.predict(xtest)
+class RidgeAugmentedModel(AugmentedModel, RidgeModel):
+    pass
 
 class ElectronDensityInformedModel(Model):
     """Two-layer informed model by electron density. This describes the linear-linear model
@@ -100,36 +93,29 @@ class ElectronDensityInformedModel(Model):
     def fit_logic(self, xtrain: Dataset, ytrain: Dataset):
         # Heuristically edensity only works the same as edensity + space charge
         edensity = self.informed["edensity"]
-        xt = xtrain + xtrain.square() + xtrain.exp()
+        xt = xtrain + xtrain.square() + xtrain.nexp()
         model_x_ed = LinearModel().fit(xt, edensity)
         model_xed_y = LinearModel().fit(xtrain + edensity, ytrain)
         return model_x_ed, model_xed_y
     
     def predict_logic(self, model: tuple[Model, Model], xtest: Dataset) -> Dataset:
         model_x_ed, model_xed_y = model
-        xt = xtest + xtest.square() + xtest.exp()
+        xt = xtest + xtest.square() + xtest.nexp()
         edensity = model_x_ed.predict(xt)
         ypred = model_xed_y.predict(xtest + edensity)
         return ypred
     
-class SpaceChargeInformedModel(Model):
+class SpaceChargeInformedModel(ElectronDensityInformedModel):
     """Two-layer informed model by space charge. This describes the linear-linear model
     where we try to use a two-layer model to first predict e density and use e density 
     and x to predict the other data"""
     def fit_logic(self, xtrain: Dataset, ytrain: Dataset):
         # Heuristically edensity only works the same as edensity + space charge
         edensity = self.informed["spacecharge"]
-        xt = xtrain + xtrain.square() + xtrain.exp()
+        xt = xtrain + xtrain.square() + xtrain.nexp()
         model_x_ed = LinearModel().fit(xt, edensity)
         model_xed_y = LinearModel().fit(xtrain + edensity, ytrain)
         return model_x_ed, model_xed_y
-    
-    def predict_logic(self, model: tuple[Model, Model], xtest: Dataset) -> Dataset:
-        model_x_ed, model_xed_y = model
-        xt = xtest + xtest.square() + xtest.exp()
-        edensity = model_x_ed.predict(xt)
-        ypred = model_xed_y.predict(xtest + edensity)
-        return ypred
 
 class PoissonNN(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
@@ -187,8 +173,8 @@ class PoissonNNModel(NeuralNetModel):
         ytest = self.informed["ytest"].to_tensor().to(device)
         sctrain = self.informed["spacecharge"].to_tensor().to(device)
         sctest = self.informed["spacecharge-test"].to_tensor().to(device)
-        xtrain = xtrain.to_tensor().to(device)
-        ytrain = ytrain.to_tensor().to(device)
+        xtrain = xtrain.to_tensor().to(device).float()
+        ytrain = ytrain.to_tensor().to(device).float()
 
         net = PoissonNN().to(device)
         optimizer = optim.LBFGS(net.parameters(), lr=0.01)
@@ -296,8 +282,8 @@ class SymmetricNNModel(NeuralNetModel):
         device = self._device
         xtest = self.informed["xtest"].to_tensor().to(device)
         ytest = self.informed["ytest"].to_tensor().to(device)
-        xtrain = xtrain.to_tensor().to(device)
-        ytrain = ytrain.to_tensor().to(device)
+        xtrain = xtrain.to_tensor().to(device).float()
+        ytrain = ytrain.to_tensor().to(device).float()
 
         net = SymmetricNN().to(device)
         optimizer = optim.LBFGS(net.parameters(), lr=0.01)
@@ -358,8 +344,8 @@ class SymmetricPoissonModel(NeuralNetModel):
         ytest = self.informed["ytest"].to_tensor().to(device)
         sctrain = self.informed["spacecharge"].to_tensor().to(device)
         sctest = self.informed["spacecharge-test"].to_tensor().to(device)
-        xtrain = xtrain.to_tensor().to(device)
-        ytrain = ytrain.to_tensor().to(device)
+        xtrain = xtrain.to_tensor().to(device).float()
+        ytrain = ytrain.to_tensor().to(device).float()
 
         net = SymmetricNN().to(device)
         optimizer = optim.LBFGS(net.parameters(), lr=0.01)
@@ -439,7 +425,10 @@ class LinearTimeSeriesModel(TimeSeriesModel):
 # nudge the result until it satisfies the poisson equation?
 # This serves to be useful in a future model
 class LinearLSTMModel(TimeSeriesModel):
-    """Use Bayesian logic to predict outcome based on past N results"""    
+    """Use Bayesian logic to predict outcome based on past N results"""
+    def get_model(self):
+        return RidgeModel()
+    
     def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
         N = self.N
         # First use a Bayesian model to predict the next data based on the prev 4 data
@@ -457,9 +446,9 @@ class LinearLSTMModel(TimeSeriesModel):
         new_x = Dataset(vgs, last_N)
         new_y = Dataset(ytrain.datas[0].reshape(-1, 1))
 
-        return RidgeModel().fit(new_x, new_y)
+        return self.get_model().fit(new_x, new_y)
     
-    def predict_logic(self, model: LinearModel, xtest: Dataset) -> Dataset:
+    def predict_logic(self, model: Model, xtest: Dataset) -> Dataset:
         N = self.N
         # First use a Bayesian model to predict the next data based on the prev 4 data
         last_N: Tensor = torch.stack([xtest.datas[i+1] for i in range(N)], axis = -1)
@@ -478,80 +467,21 @@ class LinearLSTMModel(TimeSeriesModel):
         return ypred
 
 # Variations on the same theme above
-class LinearAugmentedLSTMModel(TimeSeriesModel):
-    """Use Bayesian logic to predict outcome based on past N results"""    
-    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
-        N = self.N
-        # First use a Bayesian model to predict the next data based on the prev 4 data
-        # Simultaneously damp the xtrain past values so that nothing goes out of hand
-        last_N: Tensor = torch.stack([xtrain.datas[i+1] for i in range(N)], axis = -1)
-        last_N = last_N.reshape(-1, N)
-        last_N = last_N.double()
-        
-        # Add back the voltage as the argument
-        vgs = xtrain.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
-        vgs = vgs.reshape(-1, 1)
+class LinearAugmentedLSTMModel(LinearLSTMModel):
+    def get_model(self):
+        return RidgeAugmentedModel()
 
-        self._yshape = ytrain.datas[0].shape
-
-        new_x = Dataset(vgs, last_N)
-        new_y = Dataset(ytrain.datas[0].reshape(-1, 1))
-
-        return RidgeAugmentedModel().fit(new_x, new_y)
+class BayesianRegressionModel(MultiModel):
+    def fit_logic(self, xtrain: Dataset, ytrain: Dataset):
+        xt = xtrain.to_tensor().cpu().numpy()
+        yt = ytrain.to_tensor().cpu().numpy()
+        return ARDRegression().fit(xt, yt)
     
-    def predict_logic(self, model: RidgeAugmentedModel, xtest: Dataset) -> Dataset:
-        N = self.N
-        # First use a Bayesian model to predict the next data based on the prev 4 data
-        last_N: Tensor = torch.stack([xtest.datas[i+1] for i in range(N)], axis = -1)
-        last_N = last_N.reshape(-1, N)
-        last_N = last_N.double()
-        
-        # Add back the voltage as the argument
-        vgs = xtest.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
-        vgs = vgs.reshape(-1, 1)
+    def predict_logic(self, model: ARDRegression, xtest: Dataset) -> Dataset:
+        xt = xtest.to_tensor().cpu().numpy()
+        ypred = model.predict(xt).reshape((-1, 1))
+        return Dataset(torch.as_tensor(ypred))
 
-        yshape = (len(xtest),) + self._yshape[1:]
-
-        new_x = Dataset(vgs, last_N)
-        ypred = model.predict(new_x)
-        ypred = Dataset(ypred.datas[0].view(yshape))
-        return ypred
-    
-class StochasticLSTMModel(TimeSeriesModel):
-    """Use Bayesian logic to predict outcome based on past N results"""    
-    def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
-        N = self.N
-        # First use a Bayesian model to predict the next data based on the prev 4 data
-        # Simultaneously damp the xtrain past values so that nothing goes out of hand
-        last_N: Tensor = torch.stack([xtrain.datas[i+1] for i in range(N)], axis = -1)
-        last_N = last_N.reshape(-1, N)
-        last_N = last_N.double()
-        
-        # Add back the voltage as the argument
-        vgs = xtrain.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
-        vgs = vgs.reshape(-1, 1)
-
-        self._yshape = ytrain.datas[0].shape
-
-        new_x = Dataset(vgs, last_N)
-        new_y = Dataset(ytrain.datas[0].reshape(-1, 1))
-
-        return GaussianModel().fit(new_x, new_y)
-    
-    def predict_logic(self, model: LinearModel, xtest: Dataset) -> Dataset:
-        N = self.N
-        # First use a Bayesian model to predict the next data based on the prev 4 data
-        last_N: Tensor = torch.stack([xtest.datas[i+1] for i in range(N)], axis = -1)
-        last_N = last_N.reshape(-1, N)
-        last_N = last_N.double()
-        
-        # Add back the voltage as the argument
-        vgs = xtest.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
-        vgs = vgs.reshape(-1, 1)
-
-        yshape = (len(xtest),) + self._yshape[1:]
-
-        new_x = Dataset(vgs, last_N)
-        ypred = model.predict(new_x)
-        ypred = Dataset(ypred.datas[0].view(yshape))
-        return ypred
+class StochasticLSTMModel(LinearLSTMModel):
+    def get_model(self):
+        return BayesianRegressionModel()
