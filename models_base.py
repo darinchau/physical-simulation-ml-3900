@@ -333,7 +333,11 @@ class Model(ModelFactory):
         if xtrain.num_features > self.max_num_features:
             raise TrainingError("Too many features")
         
-        self._model = self._fit_inner(xtrain, ytrain)
+        try:
+            self._model = self._fit_inner(xtrain, ytrain)
+        except ValueError as e:
+            if f"{e}".startswith("Input X contains infinity"):
+                raise TrainingError("Caught exploding coefficients during training")
 
         self._ytrain_shape = ytrain.shape
         self._xtrain_shape = xtrain.shape
