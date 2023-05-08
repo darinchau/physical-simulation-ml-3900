@@ -121,7 +121,5 @@ def debug_model(model: Model):
     
 if __name__ == "__main__":
     test_all_models([
-        SymmetricNNModel(epochs = 100),
-        PoissonNNModel(epochs = 50),
-        SymmetricPoissonModel(epochs=100)
+        StochasticLSTMModel()
     ])

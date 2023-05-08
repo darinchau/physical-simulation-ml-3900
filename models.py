@@ -393,7 +393,7 @@ class SymmetricPoissonModel(NeuralNetModel):
 # This is a debug model for the Time series model
 class LinearTimeSeriesModel(TimeSeriesModel):
     """A debug model"""
-    def __init__(self, i: int):
+    def __init__(self, i: int = 1):
         super().__init__()
         self.i = i
     
@@ -405,14 +405,33 @@ class LinearTimeSeriesModel(TimeSeriesModel):
 
 # Since we can replicate the poisson loss, can we try to make an initial prediction and 
 # nudge the result until it satisfies the poisson equation?
+# This serves to be useful in a future model
 class StochasticLSTMModel(TimeSeriesModel):
-    """First use Bayesian logic to predict outcome based on past N results, then try to nudge 
-    the results in different directions in the hopes that one day it satisfies the Poisson PDE"""    
+    """Use Bayesian logic to predict outcome based on past N results"""    
     def fit_logic(self, xtrain: Dataset, ytrain: Dataset) -> Any:
+        N = self.N
         # First use a Bayesian model to predict the next data based on the prev 4 data
-        print(xtrain.to_tensor().shape)
-        print(ytrain.to_tensor().shape)
-        return LinearModel().fit(xtrain, ytrain)
+        last_N = torch.stack([xtrain.datas[i+1] for i in range(N)], axis = -1)
+        last_N = last_N.reshape(-1, N)
+        
+        # Add back the voltage as the argument
+        vgs = xtrain.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
+        vgs = vgs.reshape(-1, 1)
+
+        new_x = Dataset(vgs, last_N)
+        new_y = Dataset(ytrain.datas[0].reshape(-1, 1))
+
+        return GaussianModel().fit(new_x, new_y)
     
-    def predict_logic(self, model, xtest: Dataset) -> Dataset:
-        return model.predict(xtest)
+    def predict_logic(self, model: GaussianModel, xtest: Dataset) -> Dataset:
+        N = self.N
+        # First use a Bayesian model to predict the next data based on the prev 4 data
+        last_N = torch.stack([xtest.datas[i+1] for i in range(N)], axis = -1)
+        last_N = last_N.reshape(-1, N)
+        
+        # Add back the voltage as the argument
+        vgs = xtest.datas[0].reshape(-1, 1, 1) + torch.zeros(1, 129, 17)
+        vgs = vgs.reshape(-1, 1)
+
+        new_x = Dataset(vgs, last_N)
+        return model.predict(new_x)
