@@ -3,10 +3,12 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from matplotlib import animation
 import numpy as np
-from load import load_spacing, load_elec_potential
+from load import load_spacing, load_elec_potential, load_space_charge
 import h5py
 from torch import Tensor
 import torch
+from derivative import laplacian_all_numpy
+from numpy.typing import NDArray
 
 # A class wrapper to help us plot data. We assume all error checking has been done
 class AnimationMaker:
@@ -124,12 +126,12 @@ class AnimationMaker:
 
 # Wrapper function to help us plot data
 def make_anim(predicted_data, original_data, path = None, title = None):
+    # Make animation for showcasing
     anim = AnimationMaker()
 
     data_vmin, data_vmax = np.min(original_data), np.max(original_data)
     anim.add_data(original_data, "Original data")
 
-    anim.add_data(predicted_data, "Predicted data")
     anim.add_data(predicted_data, "Predicted data (rescaled)", data_vmin, data_vmax)
 
     error = np.abs(predicted_data - original_data)
@@ -138,7 +140,6 @@ def make_anim(predicted_data, original_data, path = None, title = None):
     err_log_10 = log_diff(predicted_data, original_data)
     anim.add_data(err_log_10, "Error log plot")
 
-    # Errors
     rmse = np.sqrt(np.mean((predicted_data - original_data) ** 2))
     worst = np.max(np.abs(predicted_data - original_data))
     rmse_last_10_frames = np.sqrt(np.mean((predicted_data[-10:] - original_data[-10:]) ** 2))
@@ -147,11 +148,34 @@ def make_anim(predicted_data, original_data, path = None, title = None):
     error_text = f"RMSE: {round(rmse, 5)}, (last 10 frames): {round(rmse_last_10_frames, 5)}, worst = {round(worst, 5)} (last 10 frames) = {round(worst_last_10_frames, 5)}"
     anim.add_text([error_text for _ in range(101)])
 
-    # Frame number
     frames = [f"Frame {frame} - {round(frame*0.0075, 4)}V" for frame in range(101)]
     anim.add_text(frames)
 
     anim.save(path, title)
+    
+    # Make animation for debug
+    anim_debug = AnimationMaker()
+    anim_debug.add_data(original_data, "Original data")
+    anim_debug.add_data(predicted_data, "Predicted data")
+
+    frame_zero = np.zeros((101, 1, 1)) + predicted_data[0]
+    diff_log_10 = log_diff(predicted_data, frame_zero)
+    anim_debug.add_data(diff_log_10, "Evolution")
+    
+    anim_debug.add_text([f"RMSE: {np.sqrt(np.mean((predicted_data[i] - original_data[i]) ** 2)):.7f}" for i in range(101)])
+    anim_debug.add_text([f"Worst: {np.max(np.abs(predicted_data[i] - original_data[i])):.7f}" for i in range(101)])
+    
+    space_charge: NDArray = load_space_charge().cpu().numpy()
+    q = 1.60217663e-19
+    sc = space_charge.reshape(-1, 129, 17) * -q
+    ys = (1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15)
+    lapla = laplacian_all_numpy(predicted_data)
+    anim_debug.add_text([f"Poisson RMSE: {np.sqrt(np.mean((sc[i, 1:-1, ys] - lapla[i, 1:-1, ys]) ** 2)):.7f}" for i in range(101)])
+
+    anim_debug.add_text([f"Frame {frame} - {round(frame*0.0075, 4)}V" for frame in range(101)])
+
+    anim_debug.save(f"{path[:-4]} debug.gif", title + " debug")
+
 
 # Helper function to extract the middle region and outer region
 OUTER_REGION_WIDTH = 40

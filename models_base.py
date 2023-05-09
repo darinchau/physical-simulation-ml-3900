@@ -425,28 +425,27 @@ class History:
         self.test_datas: dict[str, list] = {}
         self.epochs = 0
         self.names: set[str] = set()
+        self.logs: list[str] = []
 
     def train(self, loss, name: str):
-        if name not in self.names:
-            self.names.add(name)
-            self.train_datas[name + 'x'] = []
-            self.train_datas[name + 'y'] = []
-            self.test_datas[name + 'x'] = []
-            self.test_datas[name + 'y'] = []
-        
+        self.add_name(name)
         self.train_datas[name + 'x'].append(self.epochs)
         self.train_datas[name + 'y'].append(loss)
+        self.logs.append(f"On epoch {self.epochs}, training {name} loss = {loss}")
 
     def test(self, loss, name: str):
+        self.add_name(name)
+        self.test_datas[name + 'x'].append(self.epochs)
+        self.test_datas[name + 'y'].append(loss)
+        self.logs.append(f"On epoch {self.epochs}, testing {name} loss = {loss}")
+
+    def add_name(self, name):
         if name not in self.names:
             self.names.add(name)
             self.train_datas[name + 'x'] = []
             self.train_datas[name + 'y'] = []
             self.test_datas[name + 'x'] = []
             self.test_datas[name + 'y'] = []
-
-        self.test_datas[name + 'x'].append(self.epochs)
-        self.test_datas[name + 'y'].append(loss)
 
     def update(self):
         self.epochs += 1
@@ -461,6 +460,10 @@ class History:
         ax.legend()
         ax.set_title(f"Train/Test Error plot")
         fig.savefig(f"{root}/{name} training loss.png")
+
+    def __iter__(self):
+        for log in self.logs:
+            yield log
 
 class NeuralNetModel(Model):
     """A model except we expose the epochs argument for you, and turn on/off torch grad whenever necessary.
@@ -499,6 +502,11 @@ class NeuralNetModel(Model):
         with open(f"{root}/{name} history.txt", 'w') as f:
             if hasattr(self, "_logs"):
                 for log in self._logs:
+                    f.write(log)
+                    f.write("\n")
+                f.write("\n\n")
+                f.write("Detailed training history:")
+                for log in self._history:
                     f.write(log)
                     f.write("\n")
 

@@ -7,6 +7,7 @@
 import os
 from anim import make_plots
 from multiprocessing import Process, Pool
+import time
 
 # This suppresses the warnings when doing the log plots because theres gotta be a zero somewhere :)
 import warnings
@@ -38,8 +39,10 @@ def make_animations(path: str):
 
 def main():
     paths = [f"{FOLDER_NAME}/{path}" for path in os.listdir(FOLDER_NAME)]
+    t1 = time.time()
     with Pool(processes=8) as pool:
         pool.starmap(make_animations, [(path,) for path in paths])
+    print(f"Finished making all animation in {time.time() - t1:.4f} seconds")
 
 if __name__ == "__main__":
     main()
