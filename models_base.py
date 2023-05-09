@@ -479,10 +479,11 @@ class NeuralNetModel(Model):
             ypred = super()._predict_inner(model, xtest)
         return ypred
     
-    def __init__(self, epochs: int, verbose: bool = True):
+    def __init__(self, epochs: int, verbose: bool = True, display_every: int = 10):
         super().__init__()
         self.epochs = epochs
         self._verbose = verbose
+        self._display_every = display_every
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def predict_logic(self, model: nn.Module, xtest: Dataset) -> Dataset:

@@ -41,6 +41,8 @@ def train(mf: ModelFactory, idx: TrainingIndex, root: str):
     model.inform(sctest, "spacecharge-test")
     model.inform(xtest, "xtest")
     model.inform(ytest, "ytest")
+    model.inform(root, "path")
+    model.inform(idx.name, "inputname")
 
     # Train the model
     try:

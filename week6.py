@@ -24,6 +24,6 @@ if __name__ == "__main__":
     # ])
 
     Trainer(ROOT).test_all_models([
-        PoissonNNModel(epochs=200),
-        SymmetricPoissonModel(epochs=200)
+        PoissonModel(epochs=200, display_every=1),
+        SymmetricPoissonModel(epochs=200, display_every=1)
     ])
