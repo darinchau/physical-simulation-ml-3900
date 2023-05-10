@@ -459,7 +459,7 @@ class History:
         ax.set_yscale('log')
         ax.legend()
         ax.set_title(f"Train/Test Error plot")
-        fig.savefig(f"{root}/{name} training loss.png")
+        fig.savefig(f"{root}/{name} training loss.jpg")
 
     def __iter__(self):
         for log in self.logs:

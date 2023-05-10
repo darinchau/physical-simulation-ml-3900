@@ -160,7 +160,7 @@ def make_anim(predicted_data, original_data, path = None, title = None):
 
     frame_zero = np.zeros((101, 1, 1)) + predicted_data[0]
     diff_log_10 = log_diff(predicted_data, frame_zero)
-    anim_debug.add_data(diff_log_10, "Evolution")
+    anim_debug.add_data(diff_log_10, "Evolution (log)")
     
     anim_debug.add_text([f"RMSE: {np.sqrt(np.mean((predicted_data[i] - original_data[i]) ** 2)):.7f}" for i in range(101)])
     anim_debug.add_text([f"Worst: {np.max(np.abs(predicted_data[i] - original_data[i])):.7f}" for i in range(101)])
@@ -402,9 +402,20 @@ def log_diff(x, y):
     if isinstance(x, Tensor):
         error = torch.abs(x - y)
         err_log_10 = torch.log10(error)
-        err_log_10[error < 1e-20] = torch.min(err_log_10[error > 0]) - 1
+        try:
+            t = torch.min(err_log_10[error > 0])
+            err_log_10[error < 1e-20] = t
+            return err_log_10, float(t)
+        except ValueError as e:
+            pass
     else:
         error = np.abs(x - y)
         err_log_10 = np.log10(error)
-        err_log_10[error < 1e-20] = np.min(err_log_10[error > 0]) - 1
-    return err_log_10
+        try:
+            t = float(np.min(err_log_10[error > 0]))
+            err_log_10[error < 1e-20] = t
+            return err_log_10, t
+        except ValueError as e:
+            pass
+    err_log_10[error < 1e-20] = -20
+    return err_log_10, -20
