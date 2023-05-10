@@ -137,8 +137,8 @@ def make_anim(predicted_data, original_data, path = None, title = None):
     error = np.abs(predicted_data - original_data)
     anim.add_data(error, "Error", 0)
 
-    err_log_10 = log_diff(predicted_data, original_data)
-    anim.add_data(err_log_10, "Error log plot")
+    err_log_10, log_vmin = log_diff(predicted_data, original_data)
+    anim.add_data(err_log_10, "Error log plot", vmin = log_vmin)
 
     rmse = np.sqrt(np.mean((predicted_data - original_data) ** 2))
     worst = np.max(np.abs(predicted_data - original_data))
@@ -159,8 +159,8 @@ def make_anim(predicted_data, original_data, path = None, title = None):
     anim_debug.add_data(predicted_data, "Predicted data")
 
     frame_zero = np.zeros((101, 1, 1)) + predicted_data[0]
-    diff_log_10 = log_diff(predicted_data, frame_zero)
-    anim_debug.add_data(diff_log_10, "Evolution (log)")
+    diff_log_10, log_vmin = log_diff(predicted_data, frame_zero)
+    anim_debug.add_data(diff_log_10, "Evolution (log)", vmin = log_vmin)
     
     anim_debug.add_text([f"RMSE: {np.sqrt(np.mean((predicted_data[i] - original_data[i]) ** 2)):.7f}" for i in range(101)])
     anim_debug.add_text([f"Worst: {np.max(np.abs(predicted_data[i] - original_data[i])):.7f}" for i in range(101)])
