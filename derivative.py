@@ -1,7 +1,15 @@
+from __future__ import annotations
 import numpy as np
 import torch
 from load import load_spacing
 from numpy.typing import NDArray
+from torch import Tensor, nn
+
+__all__ = (
+    "poisson_lhs",
+    "poisson_rmse",
+    "PoissonLoss"
+)
 
 # Wrapper around albert's function, without the division by -Q
 def laplacian(data, result, eps, x, y):
@@ -31,9 +39,7 @@ def laplacian(data, result, eps, x, y):
     result[:, 1:-1, 1:-1] = div_cm
     return result
 
-def laplacian_all(data: torch.Tensor) -> torch.Tensor:
-    x, y = load_spacing()
-    result = torch.zeros_like(data)
+def poisson_lhs(data: Tensor | NDArray, x: Tensor | NDArray, y: Tensor | NDArray) -> Tensor | NDArray:
     # Currently assumed that only silicon is everywhere
     # Later, will need to adjust for the silicon-oxide interface
     relative_permittivity_silicon = 11.7
@@ -42,13 +48,45 @@ def laplacian_all(data: torch.Tensor) -> torch.Tensor:
     e0_cm = (8.85418782e-12) / 100
     
     # Actual dielectric permittivity = permittivity of free space * permittivity of material
-    eps = torch.fill(torch.zeros_like(data[:1]), e0_cm * relative_permittivity_silicon)
+    # Initialize result array
+    if isinstance(data, Tensor):
+        eps = torch.fill(torch.zeros_like(data[:1]), e0_cm * relative_permittivity_silicon)
+        result = torch.zeros_like(data)
+    elif isinstance(data, np.ndarray):
+        result = np.zeros_like(data)
+        eps = np.full_like(data[:1], e0_cm * relative_permittivity_silicon)
+    else:
+        raise TypeError(f"data (type: {type(data).__name__}) is neither a Tensor or a numpy array")
+    
     return laplacian(data, result, eps, x, y)
 
-def laplacian_all_numpy(data: NDArray) -> NDArray:
+def poisson_rmse_(data, space_charge, x, y):
+    """Returns a single number indicating the poisson rmse over the range profided"""
+    q = 1.60217663e-19
+    ep = data.reshape(-1, 129, 17)
+    sc = space_charge.reshape(-1, 129, 17) * -q
+    ys = (1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15)
+    lapla = poisson_lhs(ep, x, y)
+    if isinstance(data, Tensor):
+        return torch.sqrt(torch.mean((sc[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2))
+    elif isinstance(data, np.ndarray):
+        return float(np.sqrt(np.mean((sc[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2)))
+    raise TypeError
+
+def poisson_rmse(data: Tensor | NDArray, space_charge: Tensor | NDArray):
     x, y = load_spacing()
-    result = np.zeros_like(data)
-    relative_permittivity_silicon = 11.7
-    e0_cm = (8.85418782e-12) / 100
-    eps = np.full_like(data[:1], e0_cm * relative_permittivity_silicon)
-    return laplacian(data, result, eps, x, y)
+    return poisson_rmse_(data, space_charge, x, y)
+
+class PoissonLoss(nn.Module):
+    """Gives the poisson equation - the value of ∇²φ = S
+    where S is the space charge described in p265 of the PDF 
+    https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
+    def __init__(self):
+        super().__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        x, y = load_spacing()
+        self.x = x.to(self.device)
+        self.y = y.to(self.device)
+    
+    def forward(self, x, space_charge):
+        return poisson_rmse_(x, space_charge, self.x, self.y)

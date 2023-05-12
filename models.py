@@ -17,7 +17,7 @@ import torch.optim as optim
 from models_base import *
 from torch import Tensor
 from load import load_spacing
-from derivative import laplacian
+from derivative import PoissonLoss
 from models_base import Dataset
 
 __all__ = (
@@ -131,36 +131,6 @@ class PoissonNN(nn.Module):
 
     def forward(self, x):
         return self.fc(x)
-    
-class PoissonLoss(nn.Module):
-    """Gives the poisson equation - the value of ∇²φ = S
-    where S is the space charge described in p265 of the PDF 
-    https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
-    def __init__(self):
-        super().__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        x, y = load_spacing()
-        self.x = x.to(self.device)
-        self.y = y.to(self.device)
-    
-    def forward(self, x, space_charge):
-        # Refer to the compare_derivative method
-        q = 1.60217663e-19
-        ep = x.reshape(-1, 129, 17)
-        sc = space_charge.reshape(-1, 129, 17) * -q
-        ys = (1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15)
-        # Currently assumed that only silicon is everywhere
-        # Later, will need to adjust for the silicon-oxide interface
-        relative_permittivity_silicon = 11.7
-        
-        # Convert free space permittivity to F/cm
-        e0_cm = (8.85418782e-12) / 100
-        
-        # Actual dielectric permittivity = permittivity of free space * permittivity of material
-        eps = torch.fill(torch.zeros_like(ep[:1]), e0_cm * relative_permittivity_silicon)
-        lapla = laplacian(ep, torch.zeros_like(ep).to(self.device), eps, self.x, self.y)
-        rmse = torch.sqrt(torch.mean((sc[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2))
-        return rmse
 
 # Possion equation verifier - using autograd to try and verify neural nets
 class PoissonModel(NeuralNetModel):
@@ -388,3 +358,7 @@ class BayesianRegressionModel(MultiModel):
 class StochasticLSTMModel(LinearLSTMModel):
     def get_model(self):
         return BayesianRegressionModel()
+
+class PoissonAutoRegressionModel:
+    """This model takes in last n data, last n space charge, and the vg, and predicts this data and this space charge"""
+    

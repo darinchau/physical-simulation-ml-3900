@@ -7,7 +7,7 @@ from load import load_spacing, load_elec_potential, load_space_charge
 import h5py
 from torch import Tensor
 import torch
-from derivative import laplacian_all_numpy
+from derivative import poisson_rmse
 from numpy.typing import NDArray
 
 # A class wrapper to help us plot data. We assume all error checking has been done
@@ -124,58 +124,58 @@ class AnimationMaker:
 
         plt.close("all")
 
-# Wrapper function to help us plot data
-def make_anim(predicted_data, original_data, path = None, title = None):
+def make_dem_animation(ypred, y) -> AnimationMaker:
     # Make animation for showcasing
     anim = AnimationMaker()
 
-    data_vmin, data_vmax = np.min(original_data), np.max(original_data)
-    anim.add_data(original_data, "Original data")
+    ymin, ymax = np.min(y), np.max(y)
+    anim.add_data(y, "Original data")
 
-    anim.add_data(predicted_data, "Predicted data (rescaled)", data_vmin, data_vmax)
+    anim.add_data(ypred, "Predicted data (rescaled)", ymin, ymax)
 
-    error = np.abs(predicted_data - original_data)
+    error = np.abs(ypred - y)
     anim.add_data(error, "Error", 0)
 
-    err_log_10, log_vmin = log_diff(predicted_data, original_data)
+    err_log_10, log_vmin = log_diff(ypred, y)
     anim.add_data(err_log_10, "Error log plot", vmin = log_vmin)
 
-    rmse = np.sqrt(np.mean((predicted_data - original_data) ** 2))
-    worst = np.max(np.abs(predicted_data - original_data))
-    rmse_last_10_frames = np.sqrt(np.mean((predicted_data[-10:] - original_data[-10:]) ** 2))
-    worst_last_10_frames = np.max(np.abs(predicted_data[-10:] - original_data[-10:]))
+    rmse = np.sqrt(np.mean((ypred - y) ** 2))
+    worst = np.max(np.abs(ypred - y))
+    rmse_last_10_frames = np.sqrt(np.mean((ypred[-10:] - y[-10:]) ** 2))
+    worst_last_10_frames = np.max(np.abs(ypred[-10:] - y[-10:]))
 
     error_text = f"RMSE: {round(rmse, 5)}, (last 10 frames): {round(rmse_last_10_frames, 5)}, worst = {round(worst, 5)} (last 10 frames) = {round(worst_last_10_frames, 5)}"
     anim.add_text([error_text for _ in range(101)])
 
     frames = [f"Frame {frame} - {round(frame*0.0075, 4)}V" for frame in range(101)]
     anim.add_text(frames)
+    return anim
 
-    anim.save(path, title)
-    
+def make_debug_animation(ypred, y) -> AnimationMaker:
     # Make animation for debug
-    anim_debug = AnimationMaker()
-    anim_debug.add_data(original_data, "Original data")
-    anim_debug.add_data(predicted_data, "Predicted data")
+    anim = AnimationMaker()
+    anim.add_data(y, "Original data")
+    anim.add_data(ypred, "Predicted data")
 
-    frame_zero = np.zeros((101, 1, 1)) + predicted_data[0]
-    diff_log_10, log_vmin = log_diff(predicted_data, frame_zero)
-    anim_debug.add_data(diff_log_10, "Evolution (log)", vmin = log_vmin)
+    frame_zero = np.zeros((101, 1, 1)) + ypred[0]
+    diff_log_10, log_vmin = log_diff(ypred, frame_zero)
+    anim.add_data(diff_log_10, "Evolution (log)", vmin = log_vmin)
     
-    anim_debug.add_text([f"RMSE: {np.sqrt(np.mean((predicted_data[i] - original_data[i]) ** 2)):.7f}" for i in range(101)])
-    anim_debug.add_text([f"Worst: {np.max(np.abs(predicted_data[i] - original_data[i])):.7f}" for i in range(101)])
+    anim.add_text([f"RMSE: {np.sqrt(np.mean((ypred[i] - y[i]) ** 2)):.7f}" for i in range(101)])
+    anim.add_text([f"Worst: {np.max(np.abs(ypred[i] - y[i])):.7f}" for i in range(101)])
     
     space_charge: NDArray = load_space_charge().cpu().numpy()
-    q = 1.60217663e-19
-    sc = space_charge.reshape(-1, 129, 17) * -q
-    ys = (1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15)
-    lapla = laplacian_all_numpy(predicted_data)
-    anim_debug.add_text([f"Poisson RMSE: {np.sqrt(np.mean((sc[i, 1:-1, ys] - lapla[i, 1:-1, ys]) ** 2)):.7f}" for i in range(101)])
+    anim.add_text([f"Poisson RMSE: {poisson_rmse(ypred[i:i+1], space_charge[i:i+1]):.7f}" for i in range(101)])
 
-    anim_debug.add_text([f"Frame {frame} - {round(frame*0.0075, 4)}V" for frame in range(101)])
+    anim.add_text([f"Frame {frame} - {round(frame*0.0075, 4)}V" for frame in range(101)])
+    return anim
 
-    anim_debug.save(f"{path[:-4]} debug.gif", title + " debug")
-
+# Wrapper function to help us plot data
+def make_anim(predicted_data, original_data, path = None, title = None):
+    a1 = make_dem_animation(predicted_data, original_data)
+    a2 = make_debug_animation(predicted_data, original_data)
+    a1.save(path, title)
+    a2.save(f"{path[:-4]} debug.gif", title + " debug")
 
 # Helper function to extract the middle region and outer region
 OUTER_REGION_WIDTH = 40

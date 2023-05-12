@@ -2,7 +2,7 @@
 
 import os
 
-PATH = "./Datas/Week 6"
+PATH = "./Datas/Week 7"
 
 if __name__ == "__main__":
     for foldername, subfolders, filenames in os.walk(PATH):

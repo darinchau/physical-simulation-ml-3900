@@ -1,12 +1,6 @@
 __pycache__
 *.npy
-model_*
 *.gif
 Datas/*
 Datas
 *.png
-
-
-# Added by cargo
-
-/target
