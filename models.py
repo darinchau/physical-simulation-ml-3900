@@ -16,7 +16,7 @@ from torch.utils.data import TensorDataset, DataLoader
 import torch.optim as optim
 from models_base import *
 from torch import Tensor
-from load import load_spacing, get_device
+from load import *
 from derivative import PoissonLoss
 from models_base import Dataset
 
@@ -142,7 +142,7 @@ class PoissonModel(NeuralNetModel):
         # This factorization exists to make Symmetric Poisson implmemntation easier
         return PoissonNN()
     
-    def fit_logic(self, xtrain: Dataset, ytrain: Dataset, epochs: int, verbose: bool = True) -> Any:
+    def fit_logic(self, xtrain_: Dataset, ytrain_: Dataset, epochs: int, verbose: bool = True) -> Any:
         device = self._device
         xtest = self.informed["xtest"].to_tensor().to(device)
         ytest = self.informed["ytest"].to_tensor().to(device)
@@ -150,8 +150,8 @@ class PoissonModel(NeuralNetModel):
         sctest = self.informed["spacecharge-test"].to_tensor().to(device)
         path: str = self.informed["path"]
 
-        xtrain = xtrain.to_tensor().to(device)
-        ytrain = ytrain.to_tensor().to(device)
+        xtrain = xtrain_.to_tensor().to(device)
+        ytrain = ytrain_.to_tensor().to(device)
 
         net = self.neural_net().to(device).double()
         optimizer = optim.LBFGS(net.parameters(), lr=0.01)
