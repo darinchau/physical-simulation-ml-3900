@@ -9,9 +9,10 @@ from numpy.typing import NDArray
 from abc import abstractmethod as virtual, ABC
 import torch
 from torch import Tensor, nn
-from typing import Any
+from typing import Any, Iterator
 import matplotlib.pyplot as plt
-from sklearn.linear_model import LinearRegression
+from dataclasses import dataclass
+from torchsummary import summary
 
 # Filter all warnings
 import warnings
@@ -26,12 +27,34 @@ __all__ = (
     "MultiModel",
     "History",
     "NeuralNetModel",
-    "TimeSeriesModel"
+    "TimeSeriesModel",
+    "TrainingIndex"
 )
+
+# Get Cuda if cuda is available
+def get_device():
+    # return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    return torch.device('cpu')
 
 class TrainingError(Exception):
     """Errors raised in the Models module which are recoverable and can be simply and safely skipped over."""
     pass
+
+# A wrapper class for training indices
+@dataclass
+class TrainingIndex:
+    name: str
+    start: int
+    stop: int
+    
+    def __iter__(self):
+        i = self.start
+        while i < self.stop:
+            yield i
+            i += 1
+
+    def include(self):
+        return list(range(self.start, self.stop))
 
 class Dataset:
     """A wrapper for Numpy arrays/torch tensors for easy manipulation of cutting, slicing, etc"""
@@ -143,16 +166,12 @@ class Dataset:
         d.wrap_inplace(shape)
         return d
     
-    def split_at(self, idxs: list[int]):
+    def split_at(self, idxs: TrainingIndex):
         """Extracts the dataset at the specified indices. The order of data is preserved while the order of excluded_datas is not"""
         shape = self.shape
         flatten = self.to_tensor()
 
-        # Remove duplicates
-        seen = set()
-        seen_add = seen.add
-        include_data =  [x for x in idxs if not (x in seen or seen_add(x))]
-
+        include_data = idxs.include()
         data = Dataset(flatten[include_data])
         data.wrap_inplace((len(include_data),) + shape[1:])
 
@@ -196,6 +215,26 @@ class Dataset:
     def __iadd__(self, data: Dataset) -> Dataset:
         d = self.append(data)
         self.__data = d.datas
+        return self
+    
+    # Unadd operation which extracts the nth data
+    def extract(self, i: int) -> Dataset:
+        """Extracts the ith set of data. Does not create a copy"""
+        return Dataset(self.datas[i])
+    
+    # This allows unpacking operator
+    def __iter__(self) -> Dataset:
+        for d in self.datas:
+            yield Dataset(d)
+
+    # Iterates through each data in the dataset
+    def into_iter(self) -> Iterator[Tensor]:
+        """Iterates through the dataset"""
+        for i in range(len(self)):
+            yield self[i].to_tensor()
+
+    def to(self, device):
+        self.__data = [d.to(device) for d in self.datas]
         return self
     
 class ModelFactory(ABC):
@@ -487,7 +526,7 @@ class NeuralNetModel(Model):
         self.epochs = epochs
         self._verbose = verbose
         self._display_every = display_every
-        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._device = get_device()
 
     def predict_logic(self, model: nn.Module, xtest: Dataset) -> Dataset:
         xt = xtest.to_tensor().to(self._device)
@@ -509,6 +548,7 @@ class NeuralNetModel(Model):
                 for log in self._history:
                     f.write(log)
                     f.write("\n")
+            f.write(summary(self._net).__repr__())
 
 class TimeSeriesModel(Model):
     def __init__(self, use_past_n = 5):
@@ -530,16 +570,11 @@ class TimeSeriesModel(Model):
             raise ValueError("Currently, Time series model abstract class only works on one-dimensional data, which is the time")
         
         # Check if data is evenly spaced. This depends on the fact that use-last-n requires a minimum of 2
-        xt = xtrain.to_tensor().view(-1)
-        diff = xt[1] - xt[0]
-        data_diffs = torch.abs(xt[1:] - xt[:-1]) - diff
-        if not torch.all(torch.abs(data_diffs) < 1e-7):
-            print(xt)
-            print(xt[1:])
-            print(xt[:-1])
-            print(torch.abs(data_diffs))
-            print(torch.max(torch.abs(data_diffs)))
-            raise ValueError("Time series model has uneven spacing")
+        # xt = xtrain.to_tensor().view(-1)
+        # diff = xt[1] - xt[0]
+        # data_diffs = torch.abs(xt[1:] - xt[:-1]) - diff
+        # if not torch.all(torch.abs(data_diffs) < 1e-7):
+        #     raise ValueError("Time series model has uneven spacing")
         
         fw_x = xtrain.clone()[N:]
         for i in range(1, N+1):
@@ -553,13 +588,13 @@ class TimeSeriesModel(Model):
         # Fit an extra linear component to predict everything before
         xt = xtrain.to_tensor().cpu().numpy()
         yt = ytrain.to_tensor().cpu().numpy()
-        linear = LinearRegression().fit(xt, yt)
+        linear = Linear().fit(xt, yt)
         return fw, linear
     
     def _predict_inner(self, model, xtest: Dataset) -> Dataset:
         N = self.N
         fw, linear = model
-        assert isinstance(linear, LinearRegression)
+        assert isinstance(linear, Linear)
 
         # Predict until cover the whole range in time steps
         diff = self._x.datas[0][1] - self._x.datas[0][0]

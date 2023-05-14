@@ -222,6 +222,7 @@ class StaticPlotMaker:
 # include_in_error is a variable which contains a list of strings to include in the error plots
 # If none, then include everything
 def make_plots(path, model_name = None, include_keys: list[str] | None = None):
+    """Main function for plots creation"""
     # Retreive the model name from the path if the user did not provide explicitly
     if model_name is None:
         model_name = path.split("/")[-1]

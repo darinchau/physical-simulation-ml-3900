@@ -16,7 +16,7 @@ from torch.utils.data import TensorDataset, DataLoader
 import torch.optim as optim
 from models_base import *
 from torch import Tensor
-from load import load_spacing
+from load import load_spacing, get_device
 from derivative import PoissonLoss
 from models_base import Dataset
 
@@ -29,6 +29,7 @@ __all__ = (
     "LinearAugmentedModel",
     "LinearLSTMModel",
     "LinearModel",
+    "LSTMModel",
     "Model",
     "ModelFactory",
     "PoissonModel",
@@ -248,7 +249,7 @@ class SymmetricNN(nn.Module):
             nn.Sigmoid()
         )
         self.x_spacing = load_spacing()[0]
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
 
     def forward(self, x: Tensor):
         x = self.fc(x)
@@ -359,6 +360,101 @@ class StochasticLSTMModel(LinearLSTMModel):
     def get_model(self):
         return BayesianRegressionModel()
 
-class PoissonAutoRegressionModel:
-    """This model takes in last n data, last n space charge, and the vg, and predicts this data and this space charge"""
+class LSTMModel(Model):
+    """Prof. Wong and Albert's idea for the LSTM model"""
+    def get_model(self) -> Model:
+        return LinearModel()
     
+    def get_fallback(self) -> Model:
+        return LinearRegression()
+    
+    @property
+    def min_training_data(self) -> int:
+        return 2
+    
+    def _fit_inner(self, xtrain: Dataset, ytrain: Dataset):
+        # Check if data is one dimensional
+        if xtrain.shape[1][0] != 1:
+            raise ValueError("Currently, Time series model abstract class only works on one-dimensional data, which is the time")
+        
+        return super()._fit_inner(xtrain, ytrain)
+    
+    def fit_logic(self, x: Dataset, y: Dataset):
+        space_charge = self.informed["spacecharge"]
+        new_x = x[1:] + space_charge[:-1] + y[:-1]
+        new_y = y[1:] + space_charge[1:]
+        model = self.get_model().fit(new_x, new_y)
+        self._x = x
+        self._xsc = space_charge
+        self._y = y
+
+        xt = x.to_tensor().cpu().numpy()
+        yt = y.to_tensor().cpu().numpy()
+        linear = self.get_fallback().fit(xt, yt)
+        return model, linear
+    
+    def predict_logic(self, model, xtest: Dataset) -> Dataset:
+        fw, linear = model
+        assert isinstance(linear, LinearRegression)
+        assert isinstance(fw, Model)
+
+        # Forecase all first
+        # Calculate the time step difference
+        time_step_diff = (self._x.datas[0][1] - self._x.datas[0][0])[0]
+        furthest_time_step = torch.max(xtest.to_tensor())
+
+        # Loop until we forecast enough data to return
+        next_x = self._x.datas[0][-1][0]
+        while next_x <= furthest_time_step:
+            # Add increment
+            next_x += time_step_diff
+
+            # Save x first
+            new_x = Dataset(torch.tensor([[next_x]]))
+            self._x += new_x
+
+            # Build in the last time step results
+            new_x = new_x + self._xsc[-1] + self._y[-1]
+            ypred, scpred = fw.predict(new_x)
+            self._y += ypred
+            self._xsc += scpred
+
+        # Make predictions one by one
+        predictions: list[Dataset] = []
+        sorted_tensor, indices = torch.sort(self._x.datas[0][:, 0])
+        sorted_tensor = sorted_tensor.reshape(-1)
+        for i in range(len(xtest)):
+            xi = xtest[i]
+            x = xi.datas[0][0][0]
+
+            # Case 1: smaller than everything in x
+            x_min = torch.min(self._x.datas[0])
+            if x < x_min:
+                ypred = Dataset(linear.predict(xi.to_tensor().cpu().numpy()))
+                predictions.append(ypred)
+                continue
+
+            # Case 2: in between something in x
+            index_left = torch.searchsorted(sorted_tensor, x, right=False)
+            index_right = torch.searchsorted(sorted_tensor, x, right=True)
+            left, right = indices[index_left], indices[index_right]
+            if left == right:
+                ypred = Dataset(self._y.datas[0][left].reshape(1, -1))
+                predictions.append(ypred)
+                continue
+            
+            # predict the result linearly
+            new_xtrain = self._x.datas[0][(left, right), :].cpu().numpy().reshape(2, -1)
+            new_ytrain = self._y.datas[0][(left, right), :].cpu().numpy().reshape(2, -1)
+            lin = LinearRegression().fit(new_xtrain, new_ytrain)
+            ypred = Dataset(lin.predict(np.array([[x]])))
+            predictions.append(ypred)
+        
+        # Return the predictions
+        if len(predictions) == 1:
+            return predictions[0]
+        
+        d = predictions[0]
+        for i in range(1, len(predictions)):
+            d += predictions[i]
+        return d

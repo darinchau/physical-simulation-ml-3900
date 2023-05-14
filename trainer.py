@@ -3,20 +3,11 @@
 import numpy as np
 from models import *
 from load import *
-from dataclasses import dataclass
 import multiprocessing as mp
 from anim import make_plots
 from multiprocessing import Pool
+from models_base import TrainingIndex
 
-# A wrapper class for training indices
-@dataclass
-class TrainingIndex:
-    name: str
-    indices: list[int]
-    
-    def __iter__(self):
-        return iter(self.indices)
-    
 def train(mf: ModelFactory, idx: TrainingIndex, root: str):
     # Get the datas
     print(f"Starting training for {mf.name} on {idx.name}")
@@ -61,28 +52,32 @@ def train(mf: ModelFactory, idx: TrainingIndex, root: str):
     return idx.name, np.array(ypred)
 
 TRAINING_IDXS = {
-    "First 5": TrainingIndex("First 5", range(5)),
-    "First 20": TrainingIndex("First 20", range(20)),
-    "First 30": TrainingIndex("First 30", range(30)),
-    "First 40": TrainingIndex("First 40", range(40)),
-    "First 60": TrainingIndex("First 60", range(60)),
-    "First 75": TrainingIndex("First 75", range(75)),
-    "First 90": TrainingIndex("First 90", range(90)),
-    "15 to 45": TrainingIndex("15 to 45", range(15, 45)),
-    "20 to 40": TrainingIndex("20 to 40", range(20, 40)),
-    "40 to 60": TrainingIndex("40 to 60", range(40, 60)),
-    "25 to 35": TrainingIndex("25 to 35", range(25, 35)),
-    "20 to 50": TrainingIndex("20 to 50", range(20, 50)),
-    "30 to 50": TrainingIndex("30 to 50", range(30, 50)),
-    "29 and 30 and 31": TrainingIndex("29 and 30 and 31", [29, 30, 31])
+    "First 5": TrainingIndex("First 5", 0, 5),
+    "First 20": TrainingIndex("First 20", 0, 20),
+    "First 30": TrainingIndex("First 30", 0, 30),
+    "First 40": TrainingIndex("First 40", 0, 40),
+    "First 60": TrainingIndex("First 60", 0, 60),
+    "First 75": TrainingIndex("First 75", 0, 75),
+    "First 90": TrainingIndex("First 90", 0, 90),
+    "15 to 45": TrainingIndex("15 to 45", 15, 45),
+    "20 to 40": TrainingIndex("20 to 40", 20, 40),
+    "40 to 60": TrainingIndex("40 to 60", 40, 60),
+    "25 to 35": TrainingIndex("25 to 35", 25, 35),
+    "20 to 50": TrainingIndex("20 to 50", 20, 50),
+    "30 to 50": TrainingIndex("30 to 50", 30, 50),
+    "29 and 30 and 31": TrainingIndex("29 and 30 and 31", 29, 32)
 }
 
 class Trainer:
-    def __init__(self, root: str):
+    def __init__(self, root: str, train_fn = None):
+        if train_fn is None:
+            self.train_fn = train
+        else:
+            self.train_fn = train_fn
         self.root = root
     
     # Puts a model to the test with the given training indices
-    def test_model(self, mf: ModelFactory, training_idxs: list[TrainingIndex], force_sequential: bool = False):
+    def test_model(self, mf: ModelFactory, training_idxs: list[TrainingIndex], force_sequential: bool = False):        
         # Create folder
         path = get_folder_directory(self.root, mf)
         predictions = {}
@@ -91,10 +86,10 @@ class Trainer:
         if mf.threads == 1 or force_sequential:
             results = []
             for idx in training_idxs:
-                results.append(train(mf, idx, path))
+                results.append(self.train_fn(mf, idx, path))
         else:
             with Pool(processes=mf.threads) as pool:
-                results = pool.starmap(train, [(mf, idx, path) for idx in training_idxs])
+                results = pool.starmap(self.train_fn, [(mf, idx, path) for idx in training_idxs])
         
         res = filter(lambda x:  x is not None, results)
         for k, v in res:
@@ -120,7 +115,7 @@ class Trainer:
             raise KeyError(f"Unknown training index: {training_idx}")
         idx = TRAINING_IDXS[training_idx]
         path = get_folder_directory(self.root, model)
-        pred = train(model, idx, path)
+        pred = self.train_fn(model, idx, path)
         if pred is None:
             print("Encountered training error")
             return

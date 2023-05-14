@@ -55,6 +55,7 @@ def peek_h5(path: str):
                 # Print the shape and first element of the dataset
                 print('\t\t', dataset.shape)
 
+
 # Deletes everythin in a folder
 def delete_folder_contents(folder_path):
     for filename in os.listdir(folder_path):

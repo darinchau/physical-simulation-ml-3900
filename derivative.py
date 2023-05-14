@@ -60,25 +60,33 @@ def poisson_lhs(data: Tensor | NDArray, x: Tensor | NDArray, y: Tensor | NDArray
     
     return laplacian(data, result, eps, x, y)
 
-def poisson_rmse_(data, space_charge, x, y):
-    """Returns a single number indicating the poisson rmse over the range profided"""
-    q = 1.60217663e-19
+def normalized_poisson_mse_(data, space_charge, x, y):
     ep = data.reshape(-1, 129, 17)
-    sc = space_charge.reshape(-1, 129, 17) * -q
+    sc = space_charge.reshape(-1, 129, 17)
     ys = (1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15)
     lapla = poisson_lhs(ep, x, y)
     if isinstance(data, Tensor):
-        return torch.sqrt(torch.mean((sc[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2))
+        return torch.mean((sc[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2)
     elif isinstance(data, np.ndarray):
-        return float(np.sqrt(np.mean((sc[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2)))
+        return np.mean((sc[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2)
     raise TypeError
+
+def poisson_mse_(data, space_charge, x, y):
+    """Returns a single number indicating the poisson rmse over the range profided"""
+    q = 1.60217663e-19
+    sc = space_charge * -q
+    return normalized_poisson_mse_(data, sc, x, y)
+
 
 def poisson_rmse(data: Tensor | NDArray, space_charge: Tensor | NDArray):
     x, y = load_spacing()
-    return poisson_rmse_(data, space_charge, x, y)
+    if isinstance(data, Tensor):
+        return torch.sqrt(poisson_mse_(data, space_charge, x, y))
+    else:
+        return np.sqrt(poisson_mse_(data, space_charge, x, y))
 
 class PoissonLoss(nn.Module):
-    """Gives the poisson equation - the value of ∇²φ = S
+    """Gives the poisson equation - the value of ||∇²φ - (-q)S||
     where S is the space charge described in p265 of the PDF 
     https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
     def __init__(self):
@@ -89,4 +97,12 @@ class PoissonLoss(nn.Module):
         self.y = y.to(self.device)
     
     def forward(self, x, space_charge):
-        return poisson_rmse_(x, space_charge, self.x, self.y)
+        return poisson_mse_(x, space_charge, self.x, self.y)
+
+class NormalizedPoissonLoss(PoissonLoss):
+    """Normalized means we assume space charge has already been multiplied by -q
+    Gives the poisson equation - the value of ||∇²φ - (-q)S||
+    where S is the space charge described in p265 of the PDF 
+    https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
+    def forward(self, x, space_charge):
+        return poisson_mse_(x, space_charge, self.x, self.y)
