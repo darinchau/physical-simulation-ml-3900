@@ -172,6 +172,11 @@ def make_debug_animation(ypred, y) -> AnimationMaker:
 
 # Wrapper function to help us plot data
 def make_anim(predicted_data, original_data, path = None, title = None):
+    if path is None:
+        import time
+        path = f"./{time.time_ns()}.gif"
+    if title is None:
+        title = "Animation"
     a1 = make_dem_animation(predicted_data, original_data)
     a2 = make_debug_animation(predicted_data, original_data)
     a1.save(path, title)

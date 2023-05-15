@@ -1,4 +1,5 @@
 import sys
+import gc
 import numpy as np
 from models import *
 from load import *
@@ -27,19 +28,18 @@ class Progress:
 LATENT = 2
 
 class Encoder(nn.Module):
-    # Who wrote this garbage
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.l1 = nn.Linear(4386, 300)
-        self.s1 = nn.Tanh()
+        self.s1 = nn.Sigmoid()
         self.l2 = nn.Linear(300, 50)
-        self.s2 = nn.Tanh()
+        self.s2 = nn.Sigmoid()
 
         self.lmu = nn.Linear(50, LATENT)
-        self.smu = nn.Tanh()
+        self.smu = nn.Sigmoid()
 
         self.lsi = nn.Linear(50, LATENT)
-        self.ssi = nn.Tanh()
+        self.ssi = nn.Sigmoid()
 
         # Move device to cuda if possible
         device = get_device()
@@ -52,25 +52,21 @@ class Encoder(nn.Module):
         # Flatten
         x = torch.flatten(x, start_dim=1)
 
-        # Linear 1 + normalization + tanh activation
+        # Linear 1 + normalization + activation
         x = self.l1(x)
-        mx = torch.max(torch.abs(x))
-        x = self.s1(x/mx)*mx
+        x = self.s1(x)
 
-        # Linear 2 + normalization + tanh
+        # Linear 2 + normalization + activation
         x = self.l2(x)
-        mx = torch.max(torch.abs(x))
-        x = self.s2(x/mx)*mx
+        x = self.s2(x)
 
         # mu + normalization
         mu = self.lmu(x)
-        mx = torch.max(torch.abs(mu))
-        mu = self.smu(mu/mx)*mx
+        mu = self.smu(mu)
 
         # sigma + normalization + exp to make sigma positive
         sigma = self.lsi(x)
-        mx = torch.max(torch.abs(sigma))
-        sigma = self.ssi(sigma/mx)*mx
+        sigma = self.ssi(sigma)
         sigma = torch.exp(sigma)
 
         # z = mu + sigma * N(0, 1)
@@ -84,24 +80,21 @@ class Decoder(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.l1 = nn.Linear(LATENT, 50)
-        self.s1 = nn.Tanh()
+        self.s1 = nn.Sigmoid()
         self.l2 = nn.Linear(50, 300)
-        self.s2 = nn.Tanh()
+        self.s2 = nn.Sigmoid()
         self.l3 = nn.Linear(300, 4386)
-        self.s3 = nn.Tanh()
+        self.s3 = nn.Sigmoid()
 
     def forward(self, x):
         x = self.l1(x)
-        mx = torch.max(torch.abs(x))
-        x = self.s1(x/mx)*mx
+        x = self.s1(x)
 
         x = self.l2(x)
-        mx = torch.max(torch.abs(x))
-        x = self.s2(x/mx)*mx
+        x = self.s2(x)
 
         x = self.l3(x)
-        mx = torch.max(torch.abs(x))
-        x = self.s3(x/mx)*mx
+        x = self.s3(x)
         return x
 
 class PoissonVAE(nn.Module):
@@ -117,30 +110,74 @@ class PoissonVAE(nn.Module):
 
 Q = 1.60217663e-19
 
-def train(epochs: int):
+# Use this with the debugger to create an ad hoc cuda memory watcher in profile txt
+class CudaMonitor:
+    # Property flag forces things to save everytime a line of code gets run in the debugger
+    @property
+    def memory(self):
+        s = []
+        for obj in gc.get_objects():
+            try:
+                if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                    # Total numbers
+                    total = 1
+                    for i in obj.shape:
+                        total *= i
+                    s.append((total, f"Tensor: {type(obj)}, size: {obj.size()}, shape: {obj.shape}"))
+            except KeyboardInterrupt:
+                raise KeyboardInterrupt
+            except Exception as e:
+                pass
+        s = [x[1] for x in sorted(s, key = lambda a: a[0], reverse = True)]
+        with open("profile.txt", 'w') as f:
+            f.write(f"Memory allocated: {torch.cuda.memory_allocated()}\n")
+            f.write(f"Max memory allocated: {torch.cuda.max_memory_allocated()}\n")
+            for y in s:
+                f.write(y)
+                f.write("\n")
+        return "\n".join(s)
+    
+    def clear(self):
+        torch.cuda.empty_cache()
+        for obj in gc.get_objects():
+            try:
+                if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                    del obj
+            except KeyboardInterrupt:
+                raise KeyboardInterrupt
+            except Exception as e:
+                pass
+
+def load():
     ep = Dataset(load_elec_potential())
     sc = Dataset(load_space_charge() * (-Q))
     epsc = (ep + sc).clone().to_tensor().reshape(-1, 1, 4386)
     print(epsc.shape)
+    return epsc
 
+def train(epochs: int):
     device = get_device()
     net = PoissonVAE().to(device).double()
     history = []
     mse = nn.MSELoss()
     poi = NormalizedPoissonRMSE()
-    epsc = epsc.to(device)
-    optimizer = torch.optim.LBFGS(net.parameters(), lr=0.01)
+    epsc = load().to(device)
+    optimizer = torch.optim.Adam(net.parameters(), lr=0.01)
     p = Progress()
+    c = CudaMonitor()
 
     for epoch in range(epochs):
         for x in epsc:
             def closure():
+                # Bring memory watcher in :)
+                nonlocal c
+
                 if torch.is_grad_enabled():
                     optimizer.zero_grad()
 
                 x_hat = net(x)
                 mse_loss = mse(x, x_hat)
-                poi_loss = poi(x[:, :2193], x[:, 2193:])
+                poi_loss = poi(x_hat[:, :2193], x_hat[:, 2193:])
                 kl_diver = net.encoder.kl
                 loss = mse_loss + poi_loss + kl_diver
                 if loss.requires_grad:
