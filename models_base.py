@@ -13,6 +13,7 @@ from typing import Any, Iterator
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from torchsummary import summary
+
 from modules import get_device
 
 # Filter all warnings

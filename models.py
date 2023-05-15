@@ -30,7 +30,7 @@ __all__ = (
     "LinearAugmentedModel",
     "LinearLSTMModel",
     "LinearModel",
-    "LSTMModel",
+    "LSTM",
     "Model",
     "ModelFactory",
     "PoissonModel",
@@ -307,7 +307,7 @@ class StochasticLSTMModel(LinearLSTMModel):
     def get_model(self):
         return BayesianRegressionModel()
 
-class LSTMModel(Model):
+class LSTM(Model):
     """Prof. Wong and Albert's idea for the LSTM model"""
     def get_model(self) -> Model:
         return LinearModel()

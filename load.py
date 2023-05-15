@@ -4,7 +4,6 @@ import os
 import numpy as np
 from numpy.typing import NDArray
 import h5py
-from models_base import ModelFactory
 import torch
 from torch import Tensor
 
@@ -70,11 +69,11 @@ def delete_folder_contents(folder_path):
 
 # Create a folder directory, and compare the logs - if we found a training with identical hyperparameters, append to that
 # root = "./Datas/Week 6"
-def get_folder_directory(root: str, model: ModelFactory):
+def get_folder_directory(root: str, model):
     folder_path = f"{root}/{model.name}"
     return get_folder_directory_recursive(folder_path, model)
 
-def get_folder_directory_recursive(folder_path: str, model: ModelFactory):
+def get_folder_directory_recursive(folder_path: str, model):
     # If the module does not exist at all :)
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)

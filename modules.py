@@ -1,5 +1,6 @@
 ### Contains all different implementations of the NN modules, including custom layers, custom networks and custom activation
 
+import gc
 import torch
 from torch import nn, Tensor
 from load import load_spacing
@@ -49,47 +50,29 @@ class NormalizedPoissonRMSE(PoissonLoss):
 
 # A leaky sigmoid function
 class NotSigmoid(nn.Module):
-    def __init__(self, leakage = .1):
+    def __init__(self, in_size, leakage = .1):
         super().__init__()
-        device = get_device()
-        self.leakage = leakage * torch.nn.Parameter(torch.ones(1)).to(device)
+        self.leak = nn.Linear(in_size, 1)
 
     def forward(self, x):
-        return self.leakage * x + torch.sigmoid(x)
+        leakage = self.leak(x)
+        return leakage * x + torch.sigmoid(x)
     
 # Does nothing but to make code more readable
 class Identity(nn.Module):
     def forward(self, x):
         return x
-
-# Idk why I cant get an LSTM layer to work except like this
-class LSTMLayer(nn.Module):
-    def __init__(self, input_dims, hidden_dims, output_dims):
+    
+class StochasticNode(nn.Module):
+    def __init__(self, input, output):
         super().__init__()
-        self.lstm = nn.LSTM(input_size=input_dims, hidden_size=hidden_dims, batch_first=True)
-        self.linear = nn.Linear(hidden_dims, output_dims)
-        
-    def forward(self, x):
-        out, hidden = self.lstm(x.unsqueeze(0))
-        out = self.linear(hidden[0].squeeze(0))
-        return out
-
-class PoissonVAEEncoder(nn.Module):
-    def __init__(self, latent_dims):
-        super().__init__()
-        self.l1 = LSTMLayer(4386, 1000, 1000)
-        self.s1 = Identity()
-        self.l2 = nn.Linear(1000, 300)
-        self.s2 = NotSigmoid()
-        self.l3 = nn.Linear(300, 50)
-        self.s3 = nn.Sigmoid()
 
         # Use tanh for mu to constrain it around 0
-        self.lmu = nn.Linear(50, latent_dims)
+        self.lmu = nn.Linear(input, output)
         self.smu = nn.Tanh()
 
         # Use sigmoid for sigma to constrain it to positive values and around 1
-        self.lsi = nn.Linear(50, latent_dims)
+        self.lsi = nn.Linear(input, output)
         self.ssi = nn.Sigmoid()
 
         # Move device to cuda if possible
@@ -100,26 +83,12 @@ class PoissonVAEEncoder(nn.Module):
         self.kl = torch.tensor(0)
 
     def forward(self, x):
-        # Flatten
-        x = torch.flatten(x, start_dim=1)
-
-        # Linear layers
-        x, _ = self.l1(x)
-        x = self.s1(x)
-
-        x = self.l2(x)
-        x = self.s2(x)
-
-        x = self.l3(x)
-        x = self.s3(x)
-
-        # mu + normalization
         mean = self.lmu(x)
         mean = self.smu(mean)
 
         # sigma to make sigma positive
         var = self.lsi(x)
-        var = self.ssi(var)
+        var = 2 * self.ssi(var)
 
         # z = mu + sigma * N(0, 1)
         z = mean + var * self.N.sample(mean.shape)
@@ -130,58 +99,74 @@ class PoissonVAEEncoder(nn.Module):
         # https://kvfrans.com/variational-autoencoders-explained/
         # https://stats.stackexchange.com/questions/318748/deriving-the-kl-divergence-loss-for-vaes/370048#370048
         self.kl = -.5 * (torch.log(var) - var - mean * mean + 1).sum()
+
         return z
 
-class PoissonVAEDecoder(nn.Module):
-    def __init__(self, latent_dims) -> None:
+# Idk why I cant get an LSTM layer to work except like this
+class LSTMLayer(nn.Module):
+    def __init__(self, input_dims, hidden_dims, output_dims, *, layers = 2):
         super().__init__()
-        self.l1 = nn.Linear(latent_dims, 50)
-        self.s1 = nn.Sigmoid()
-        self.l2 = nn.Linear(50, 300)
-        self.s2 = nn.Sigmoid()
+        self.lstm = nn.LSTM(input_size=input_dims, hidden_size=hidden_dims, num_layers = layers)
+        self.linear = nn.Linear(hidden_dims, output_dims)
 
-        self.l3sc = nn.Linear(300, 1000)
-        self.s3sc = NotSigmoid(0.5)
-        self.l4sc = nn.Linear(1000, 2193)
-        self.s4sc = NotSigmoid(0.5)
-
-        self.l3ep = nn.Linear(300, 500)
-        self.s3ep = nn.Sigmoid()
-        self.l4ep = nn.Linear(500, 2193)
-        self.s4ep = nn.Sigmoid()
-
-    def forward(self, x):
-        x = self.l1(x)
-        x = self.s1(x)
-
-        x = self.l2(x)
-        x = self.s2(x)
-
-        ep = self.l3ep(x)
-        ep = self.s3ep(ep)
-
-        ep = self.l4ep(ep)
-        ep = self.s4ep(ep)
-        
-        sc = self.l3sc(x)
-        sc = self.s3sc(sc)
-
-        sc = self.l4sc(sc)
-        sc = self.s4sc(sc)
-
-        x = torch.cat([ep, sc], dim = -1)
-        return x
+    def forward(self, x: Tensor):
+        # Input is (N, features) so use strides to make it good first
+        # Pretend everything is one giant sequence - one batch, 101 sequences
+        out, _ = self.lstm(x)
+        out = self.linear(out.view(len(x), -1))
+        return out
 
 class PoissonVAE(nn.Module):
-    def __init__(self, encoder, decoder) -> None:
+    def __init__(self, latent) -> None:
         super().__init__()
-        self.encoder = encoder
-        self.decoder = decoder
+        self.encoder = nn.Sequential(
+            nn.Linear(4386, 512),
+            Identity(),
+            nn.Linear(512, 64),
+            nn.Tanh(),
+            nn.Linear(64, 16),
+            nn.Tanh()
+        )
+
+        self.stochastic_node = StochasticNode(16, latent)
+
+        self.decoder = nn.Sequential(
+            nn.Linear(latent, 16),
+            nn.Tanh(),
+            nn.Linear(16, 64),
+            nn.Tanh()
+        )
+
+        self.ep_decode = nn.Sequential(
+            nn.Linear(64, 256),
+            nn.Sigmoid(),
+            nn.Linear(256, 2193),
+            nn.Sigmoid()
+        )
+
+        self.sc_decode = nn.Sequential(
+            nn.Linear(64, 256),
+            nn.Tanh(),
+            nn.Linear(256, 2193),
+            nn.Tanh()
+        )
 
     def forward(self, x):
+        # Perform normalization beforehand
+        sc_max = 20
+        
+        x[:, 2193:] /= sc_max
         x = self.encoder(x)
+        x = self.stochastic_node(x)
         x = self.decoder(x)
+        ep = self.ep_decode(x)
+        sc = self.sc_decode(x)
+        x = torch.cat([ep, sc], dim = -1)
+        x[:, 2193:] *= sc_max
         return x
+    
+    def get_kl_divergence(self):
+        return self.stochastic_node.kl
     
 class SymmetricNN(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
@@ -221,3 +206,43 @@ class SymmetricNN(nn.Module):
             target[:, j, :] = weighting * x[:, col1, :] + (1-weighting) * x[:, col2, :]
         
         return target.reshape(-1, 2193)
+    
+# A helper class to monitor cuda usage for debugging
+# Use this with the debugger to create an ad hoc cuda memory watcher in profile txt
+class CudaMonitor:
+    # Property flag forces things to save everytime a line of code gets run in the debugger
+    @property
+    def memory(self):
+        print("Logging memory")
+        s = []
+        for obj in gc.get_objects():
+            try:
+                if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                    # Total numbers
+                    total = 1
+                    for i in obj.shape:
+                        total *= i
+                    s.append((total, f"Tensor: {type(obj)}, size: {obj.size()}, shape: {obj.shape}"))
+            except KeyboardInterrupt:
+                raise KeyboardInterrupt
+            except Exception as e:
+                pass
+        s = [x[1] for x in sorted(s, key = lambda a: a[0], reverse = True)]
+        with open("profile.txt", 'w') as f:
+            f.write(f"Memory allocated: {torch.cuda.memory_allocated()}\n")
+            f.write(f"Max memory allocated: {torch.cuda.max_memory_allocated()}\n")
+            for y in s:
+                f.write(y)
+                f.write("\n")
+        return "\n".join(s)
+    
+    def clear(self):
+        torch.cuda.empty_cache()
+        for obj in gc.get_objects():
+            try:
+                if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                    del obj
+            except KeyboardInterrupt:
+                raise KeyboardInterrupt
+            except Exception as e:
+                pass

@@ -2,7 +2,6 @@ from __future__ import annotations
 import numpy as np
 import torch
 from load import load_spacing
-from models_base import get_device
 from numpy.typing import NDArray
 from torch import Tensor, nn
 
