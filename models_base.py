@@ -13,6 +13,7 @@ from typing import Any, Iterator
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from torchsummary import summary
+from modules import get_device
 
 # Filter all warnings
 import warnings
@@ -21,7 +22,6 @@ warnings.filterwarnings('ignore')
 __all__ = (
     "TrainingError",
     "Dataset",
-    "get_device",
     "ModelFactory",
     "Model",
     "AugmentedModel",
@@ -31,11 +31,6 @@ __all__ = (
     "TimeSeriesModel",
     "TrainingIndex"
 )
-
-# Get Cuda if cuda is available
-def get_device():
-    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # return torch.device('cpu')
 
 class TrainingError(Exception):
     """Errors raised in the Models module which are recoverable and can be simply and safely skipped over."""

@@ -15,9 +15,10 @@ from torch import nn
 from torch.utils.data import TensorDataset, DataLoader
 import torch.optim as optim
 from models_base import *
+from modules import get_device
 from torch import Tensor
 from load import *
-from derivative import PoissonLoss
+from modules import PoissonNN, PoissonLoss, SymmetricNN
 from models_base import Dataset
 
 __all__ = (
@@ -117,21 +118,6 @@ class SpaceChargeInformedModel(ElectronDensityInformedModel):
         model_x_ed = LinearModel().fit(xt, edensity)
         model_xed_y = LinearModel().fit(xtrain + edensity, ytrain)
         return model_x_ed, model_xed_y
-
-class PoissonNN(nn.Module):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.fc = nn.Sequential(
-            nn.Linear(1, 10),
-            nn.Sigmoid(),
-            nn.Linear(10, 100),
-            nn.Sigmoid(),
-            nn.Linear(100, 2193),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        return self.fc(x)
 
 # Possion equation verifier - using autograd to try and verify neural nets
 class PoissonModel(NeuralNetModel):
@@ -236,45 +222,6 @@ class PoissonModel(NeuralNetModel):
 
         # Save one's history somewhere
         return net, history
-
-class SymmetricNN(nn.Module):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.fc = nn.Sequential(
-            nn.Linear(1, 10),
-            nn.Sigmoid(),
-            nn.Linear(10, 100),
-            nn.Sigmoid(),
-            nn.Linear(100, 17 * 72),
-            nn.Sigmoid()
-        )
-        self.x_spacing = load_spacing()[0]
-        self.device = get_device()
-
-    def forward(self, x: Tensor):
-        x = self.fc(x)
-        x = x.reshape(-1, 72, 17)
-        total = 0.078
-        
-        target = torch.zeros(x.shape[0], 129, 17).to(self.device).double()
-        target[:, :72, :] = x
-
-        for j in range(72, 129):
-            x_pos = total - self.x_spacing[j]
-
-            # Use normal flip near the edges
-            if total - x_pos < 0.02:
-                col = torch.abs(x_pos - self.x_spacing).argmin()
-                target[:, j, :] = x[:, col, :]
-                continue
-            
-            # Use lerp near the center
-            col1 = torch.searchsorted(self.x_spacing, x_pos, side='right') - 1
-            col2 = col1 + 1
-            weighting = (self.x_spacing[col2] - x_pos)/(self.x_spacing[col2] - self.x_spacing[col1])
-            target[:, j, :] = weighting * x[:, col1, :] + (1-weighting) * x[:, col2, :]
-        
-        return target.reshape(-1, 2193)
     
 # Mix symmetric and Poisson
 class SymmetricPoissonModel(PoissonModel):

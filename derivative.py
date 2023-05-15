@@ -85,25 +85,3 @@ def poisson_rmse(data: Tensor | NDArray, space_charge: Tensor | NDArray):
         return torch.sqrt(poisson_mse_(data, space_charge, x, y))
     else:
         return np.sqrt(poisson_mse_(data, space_charge, x, y))
-
-class PoissonLoss(nn.Module):
-    """Gives the poisson equation - the value of ||∇²φ - (-q)S||
-    where S is the space charge described in p265 of the PDF 
-    https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
-    def __init__(self):
-        super().__init__()
-        self.device = get_device()
-        x, y = load_spacing()
-        self.x = x.to(self.device)
-        self.y = y.to(self.device)
-    
-    def forward(self, x, space_charge):
-        return poisson_mse_(x, space_charge, self.x, self.y)
-
-class NormalizedPoissonRMSE(PoissonLoss):
-    """Normalized means we assume space charge has already been multiplied by -q
-    Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
-    where S is the space charge described in p265 of the PDF 
-    https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
-    def forward(self, x, space_charge):
-        return torch.sqrt(poisson_mse_(x, space_charge, self.x, self.y))
