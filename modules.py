@@ -5,6 +5,7 @@ import torch
 from torch import nn, Tensor
 from load import load_spacing
 from derivative import poisson_mse_, normalized_poisson_mse_
+from abc import ABC, abstractmethod as virtual
 
 # Get Cuda if cuda is available
 def get_device():
@@ -40,11 +41,10 @@ class PoissonLoss(nn.Module):
     def forward(self, x, space_charge):
         return poisson_mse_(x, space_charge, self.x, self.y)
 
-class NormalizedPoissonRMSE(PoissonLoss):
+class NormalizedPoissonMSE(PoissonLoss):
     """Normalized means we assume space charge has already been multiplied by -q
     Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
-    where S is the space charge described in p265 of the PDF 
-    https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
+    where S is the space charge described in p265 of the PDF+"""    
     def forward(self, x, space_charge):
         return normalized_poisson_mse_(x, space_charge, self.x, self.y)
 
@@ -113,9 +113,31 @@ class LSTMLayer(nn.Module):
         out, _ = self.lstm(x)
         out = self.linear(out.view(len(x), -1))
         return out
+    
+class VAEModule(nn.Module, ABC):
+    """Interface for VAE Modules"""
+    @virtual
+    def forward(self, x):
+        raise NotImplementedError
 
-class PoissonVAE(nn.Module):
-    def __init__(self, latent) -> None:
+    @virtual
+    def get_kl_divergence(self):
+        raise NotImplementedError
+    
+    @virtual
+    def encode(self, x):
+        raise NotImplementedError
+    
+    @virtual
+    def decode(self, x):
+        raise NotImplementedError
+
+    def get_latent_dims(self) -> int:
+        raise NotImplementedError
+
+
+class PoissonVAE(VAEModule):
+    def __init__(self, latent: int) -> None:
         super().__init__()
         self.encoder = nn.Sequential(
             nn.Linear(4386, 512),
@@ -125,6 +147,8 @@ class PoissonVAE(nn.Module):
             nn.Linear(64, 16),
             nn.Tanh()
         )
+
+        self.latent = latent
 
         self.stochastic_node = StochasticNode(16, latent)
 
@@ -168,6 +192,69 @@ class PoissonVAE(nn.Module):
     
     def get_kl_divergence(self):
         return self.stochastic_node.kl
+    
+    def get_latent_dims(self) -> int:
+        return self.latent
+    
+class PoissonVAE2(VAEModule):
+    def __init__(self, latent) -> None:
+        super().__init__()
+        self.encoder = nn.Sequential(
+            LSTMLayer(4386, 1000, 512),
+            NotSigmoid(512),
+            LSTMLayer(512, 128, 64),
+            nn.Tanh(),
+            nn.Linear(64, 16),
+            nn.Tanh()
+        )
+
+        self.latent = latent
+
+        self.stochastic_node = StochasticNode(16, latent)
+
+        self.decoder = nn.Sequential(
+            nn.Linear(latent, 16),
+            nn.Tanh(),
+            nn.Linear(16, 64),
+            nn.Tanh()
+        )
+
+        self.ep_decode = nn.Sequential(
+            nn.Linear(64, 256),
+            nn.Sigmoid(),
+            nn.Linear(256, 2193),
+            nn.Sigmoid()
+        )
+
+        self.sc_decode = nn.Sequential(
+            nn.Linear(64, 256),
+            NotSigmoid(256),
+            nn.Linear(256, 2193),
+            NotSigmoid(2193)
+        )
+
+    def encode(self, x):
+        x = self.encoder(x)
+        x = self.stochastic_node(x)
+        return x
+    
+    def decode(self, x):
+        x = self.decoder(x)
+        ep = self.ep_decode(x)
+        sc = self.sc_decode(x)
+        x = torch.cat([ep, sc], dim = -1)
+        return x
+
+    def forward(self, x):
+        x = self.encode(x)
+        x = self.decode(x)
+        return x
+    
+    def get_kl_divergence(self):
+        return self.stochastic_node.kl
+    
+    def get_latent_dims(self) -> int:
+        return self.latent
     
 class SymmetricNN(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
@@ -247,3 +334,20 @@ class CudaMonitor:
                 raise KeyboardInterrupt
             except Exception as e:
                 pass
+
+class VAENet1(nn.Module):
+    def __init__(self, mod):
+        super().__init__()
+        self.net: VAEModule = mod
+        for p in self.net.parameters():
+            p.requires_grad = False
+        self.fc = nn.Sequential(
+            nn.Linear(1, 3),
+            nn.Linear(3, 5)
+        )
+
+    def forward(self, x):
+        self.net.eval()
+        x = self.fc(x)
+        x = self.net.decode(x)
+        return x

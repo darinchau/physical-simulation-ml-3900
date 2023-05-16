@@ -13,6 +13,9 @@ ELECTRIC_POTENTIAL = np.load("mesh_data_electrostatic_potential.npy")
 ELECTRON_DENSITY = np.load("mesh_data_edensity.npy")
 SPACE_CHARGE = np.load("mesh_data_space_charge.npy")
 
+def load_vgs():
+    return torch.arange(101).reshape(101, 1) / 100 * 0.75
+
 # Load and return data. We expect data to be some 3 dimensional np array (N, rows, cols).
 def load_elec_potential() -> Tensor:
     return torch.tensor(ELECTRIC_POTENTIAL)

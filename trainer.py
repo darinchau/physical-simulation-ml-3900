@@ -11,7 +11,7 @@ from models_base import TrainingIndex
 def train(mf: ModelFactory, idx: TrainingIndex, root: str):
     # Get the datas
     print(f"Starting training for {mf.name} on {idx.name}")
-    vg = Dataset(np.arange(101).reshape(101, 1) / 100 * 0.75)
+    vg = Dataset(load_vgs())
     potential = Dataset(load_elec_potential())
     edensity = Dataset(load_e_density())
     space_charge = Dataset(load_space_charge())

@@ -18,8 +18,8 @@ from models_base import *
 from modules import get_device
 from torch import Tensor
 from load import *
-from modules import PoissonNN, PoissonLoss, SymmetricNN
-from models_base import Dataset
+from modules import *
+from models_base import Dataset, History
 
 __all__ = (
     "BayesianRegressionModel",
@@ -405,3 +405,97 @@ class LSTM(Model):
         for i in range(1, len(predictions)):
             d += predictions[i]
         return d
+    
+class PretrainedVAEModel(NeuralNetModel):
+    def fit_logic(self, xtrain_: Dataset, ytrain_: Dataset, epochs: int = 50, verbose: bool = True) -> tuple[nn.Module, History]:
+        device = get_device()
+        net = torch.load("./Datas/Week 7/VAE model 1/model.pt")
+        net = VAENet1(net).to(device).double()
+        opt = torch.optim.Adam(net.parameters(), lr = 0.005)
+        history = History()
+        
+        xtrain = xtrain_.to_tensor().to(device)
+        ytrain = (ytrain_ + self.informed["spacecharge"]).to_tensor().to(device)
+        xtest = self.informed["xtest"].to_tensor().to(device)
+        ytest = (self.informed["ytest"] + self.informed["spacecharge-test"]).to_tensor().to(device)
+
+        poisonn_loss = NormalizedPoissonMSE()
+
+        history = History()
+        self._logs = []
+
+        # Batch size is 1 for us so better use this approach instead
+        for epoch in range(epochs):
+            # Update the history
+            history.update()
+
+            # Train loop
+            train_loss = 0.
+            def closure():
+                if torch.is_grad_enabled():
+                    opt.zero_grad()
+
+                # Pass through network
+                ypred = net(xtrain)
+
+                # Calculate loss
+                ypred_ep = ypred[:, :2193].view(-1, 129, 17)
+                ypred_sc = ypred[:, 2193:].view(-1, 129, 17)
+                yep = ytrain[:, :2193].view(-1, 129, 17)
+                ysc = ytrain[:, 2193:].view(-1, 129, 17)
+                mseep = torch.sqrt(torch.mean((yep - ypred_ep) ** 2))
+                msesc = torch.sqrt(torch.mean((ysc - ypred_sc) ** 2))
+
+                poissonloss = torch.sqrt(poisonn_loss(ypred_ep, ypred_sc))
+                loss = mseep + msesc + poissonloss
+                if loss.requires_grad:
+                    loss.backward()
+
+                nonlocal train_loss
+                train_loss += loss.item()
+                return loss
+            opt.step(closure)
+            
+            # Test loop
+            test_loss = 0.
+            with torch.no_grad():
+                # Pass through network
+                ypred = net(xtest)
+
+                # Calculate loss
+                ypred_ep = ypred[:, :2193].view(-1, 129, 17)
+                ypred_sc = ypred[:, 2193:].view(-1, 129, 17)
+                yep = ytest[:, :2193].view(-1, 129, 17)
+                ysc = ytest[:, 2193:].view(-1, 129, 17)
+                mseep = torch.sqrt(torch.mean((yep - ypred_ep) ** 2))
+                msesc = torch.sqrt(torch.mean((ysc - ypred_sc) ** 2))
+
+                poissonloss = torch.sqrt(poisonn_loss(ypred_ep, ypred_sc))
+                loss = mseep + msesc + poissonloss
+                test_loss += loss.item()         
+
+            # Print logs if necessary
+            log = f"Trained {epoch + 1} epochs on {self.name} for {self.informed['inputname']} with train loss {train_loss}, test_loss {test_loss}"
+            self._logs.append(log)
+            if verbose:
+                print(log)
+
+            # Append the history
+            history.train(float(train_loss)/len(xtrain), "MSE loss")
+            history.test(float(test_loss)/len(xtest), "MSE loss")
+
+        # Load the best dict
+        net = self.neural_net()
+        net = net.to(device).double()
+
+        return net, history
+
+    def predict_logic(self, net: nn.Module, xtest: Dataset) -> Dataset:
+        device = get_device()
+        x = xtest.to_tensor().to(device)
+        ypred = net(x)
+        yep = ypred[:, :2193].view(-1, 129, 17)
+        return Dataset(yep.cpu())
+    
+    def save(self, root: str, name: str):
+        torch.save(self._net, f"{root}/{name} model.pt")
