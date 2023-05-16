@@ -50,7 +50,7 @@ class NormalizedPoissonRMSE(PoissonLoss):
 
 # A leaky sigmoid function
 class NotSigmoid(nn.Module):
-    def __init__(self, in_size, leakage = .1):
+    def __init__(self, in_size):
         super().__init__()
         self.leak = nn.Linear(in_size, 1)
 
@@ -77,9 +77,7 @@ class StochasticNode(nn.Module):
 
         # Move device to cuda if possible
         device = get_device()
-        zero = torch.tensor(0).float().to(device)
-        one = torch.tensor(1).float().to(device)
-        self.N = torch.distributions.Normal(zero, one)
+        self.N = torch.distributions.Normal(torch.tensor(0).float().to(device), torch.tensor(1).float().to(device))
         self.kl = torch.tensor(0)
 
     def forward(self, x):
@@ -146,23 +144,26 @@ class PoissonVAE(nn.Module):
 
         self.sc_decode = nn.Sequential(
             nn.Linear(64, 256),
-            nn.Tanh(),
+            NotSigmoid(256),
             nn.Linear(256, 2193),
-            nn.Tanh()
+            NotSigmoid(2193)
         )
 
-    def forward(self, x):
-        # Perform normalization beforehand
-        sc_max = 20
-        
-        x[:, 2193:] /= sc_max
+    def encode(self, x):
         x = self.encoder(x)
         x = self.stochastic_node(x)
+        return x
+    
+    def decode(self, x):
         x = self.decoder(x)
         ep = self.ep_decode(x)
         sc = self.sc_decode(x)
         x = torch.cat([ep, sc], dim = -1)
-        x[:, 2193:] *= sc_max
+        return x
+
+    def forward(self, x):
+        x = self.encode(x)
+        x = self.decode(x)
         return x
     
     def get_kl_divergence(self):
