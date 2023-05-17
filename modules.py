@@ -289,46 +289,6 @@ class SymmetricNN(nn.Module):
             target[:, j, :] = weighting * x[:, col1, :] + (1-weighting) * x[:, col2, :]
         
         return target.reshape(-1, 2193)
-    
-# A helper class to monitor cuda usage for debugging
-# Use this with the debugger to create an ad hoc cuda memory watcher in profile txt
-class CudaMonitor:
-    # Property flag forces things to save everytime a line of code gets run in the debugger
-    @property
-    def memory(self):
-        print("Logging memory")
-        s = []
-        for obj in gc.get_objects():
-            try:
-                if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-                    # Total numbers
-                    total = 1
-                    for i in obj.shape:
-                        total *= i
-                    s.append((total, f"Tensor: {type(obj)}, size: {obj.size()}, shape: {obj.shape}"))
-            except KeyboardInterrupt:
-                raise KeyboardInterrupt
-            except Exception as e:
-                pass
-        s = [x[1] for x in sorted(s, key = lambda a: a[0], reverse = True)]
-        with open("profile.txt", 'w') as f:
-            f.write(f"Memory allocated: {torch.cuda.memory_allocated()}\n")
-            f.write(f"Max memory allocated: {torch.cuda.max_memory_allocated()}\n")
-            for y in s:
-                f.write(y)
-                f.write("\n")
-        return "\n".join(s)
-    
-    def clear(self):
-        torch.cuda.empty_cache()
-        for obj in gc.get_objects():
-            try:
-                if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-                    del obj
-            except KeyboardInterrupt:
-                raise KeyboardInterrupt
-            except Exception as e:
-                pass
 
 class VAENet1(nn.Module):
     def __init__(self, mod):
