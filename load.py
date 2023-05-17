@@ -7,11 +7,18 @@ import h5py
 import torch
 from torch import Tensor
 
-SPACING_X = np.load("mesh_data_x.npy")
-SPACING_Y = np.load("mesh_data_y.npy")
-ELECTRIC_POTENTIAL = np.load("mesh_data_electrostatic_potential.npy")
-ELECTRON_DENSITY = np.load("mesh_data_edensity.npy")
-SPACE_CHARGE = np.load("mesh_data_space_charge.npy")
+SPACING_X = np.load("./simulation data/mesh_data_x.npy")
+SPACING_Y = np.load("./simulation data/mesh_data_y.npy")
+ELECTRIC_POTENTIAL = np.load("./simulation data/mesh_data_electrostatic_potential.npy")
+ELECTRON_DENSITY = np.load("./simulation data/mesh_data_edensity.npy")
+SPACE_CHARGE = np.load("./simulation data/mesh_data_space_charge.npy")
+MATERIALS = np.load("./simulation data/mesh_data_materials.npy")
+CONTACTS = np.load("./simulation data/mesh_data_contacts.npy")
+
+# Get Cuda if cuda is available
+def get_device():
+    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # return torch.device('cpu')
 
 def load_vgs():
     return torch.arange(101).reshape(101, 1) / 100 * 0.75
@@ -28,6 +35,12 @@ def load_spacing() -> Tensor:
 
 def load_space_charge() -> Tensor:
     return torch.tensor(np.nan_to_num(SPACE_CHARGE, nan=0))
+
+def load_materials() -> Tensor:
+    return torch.tensor(MATERIALS)
+
+def load_contacts() -> Tensor:
+    return torch.tensor(CONTACTS)
 
 ### Save h5 files
 def save_h5(d: dict[str, NDArray], path: str):

@@ -3,14 +3,9 @@
 import gc
 import torch
 from torch import nn, Tensor
-from load import load_spacing
+from load import load_spacing, get_device
 from derivative import poisson_mse_, normalized_poisson_mse_
 from abc import ABC, abstractmethod as virtual
-
-# Get Cuda if cuda is available
-def get_device():
-    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # return torch.device('cpu')
 
 class PoissonNN(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
