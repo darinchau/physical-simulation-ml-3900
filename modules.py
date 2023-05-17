@@ -6,32 +6,49 @@ from torch import nn, Tensor
 from load import load_spacing, get_device
 from derivative import poisson_mse_, normalized_poisson_mse_
 from abc import ABC, abstractmethod as virtual
+from model_base import Model, ModelBase
+from sklearn.linear_model import TheilSenRegressor
 
-class PoissonNN(nn.Module):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.fc = nn.Sequential(
-            nn.Linear(1, 10),
-            nn.Sigmoid(),
-            nn.Linear(10, 100),
-            nn.Sigmoid(),
-            nn.Linear(100, 2193),
-            nn.Sigmoid()
-        )
+class Sequential(Model):
+    """Sequential model"""
+    def __init__(self, *f):
+        self.fs = f
 
     def forward(self, x):
-        return self.fc(x)
+        for model in self.fs:
+            x = model(x)
+        return x
+    
+    def _model_children(self):
+        for i, model in enumerate(self.fs):
+            assert isinstance(model, Model)
+            yield str(i), model
+    
+    def _deserialize(self, state: dict):
+        for k, v in state.items():
+            if k in ("_init_=args", "_init_=kwargs"):
+                continue
+            self.fs[int(k)]._deserialize(v)
+        return self
 
-class PoissonLoss(nn.Module):
+class Linear(ModelBase):
+    """Linear layer"""
+    def __init__(self, in_size: int, out_size: int):
+        self.fc = nn.Linear(in_size, out_size)
+    
+    def forward(self, x):
+        x = self.fc(x)
+        return x
+
+class PoissonLoss(ModelBase):
     """Gives the poisson equation - the value of ||∇²φ - (-q)S||
     where S is the space charge described in p265 of the PDF 
     https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
     def __init__(self):
-        super().__init__()
-        self.device = get_device()
+        device = get_device()
         x, y = load_spacing()
-        self.x = x.to(self.device)
-        self.y = y.to(self.device)
+        self.x = x.to(device)
+        self.y = y.to(device)
     
     def forward(self, x, space_charge):
         return poisson_mse_(x, space_charge, self.x, self.y)
@@ -42,11 +59,21 @@ class NormalizedPoissonMSE(PoissonLoss):
     where S is the space charge described in p265 of the PDF+"""    
     def forward(self, x, space_charge):
         return normalized_poisson_mse_(x, space_charge, self.x, self.y)
+    
+class MSELoss(ModelBase):
+    def forward(self, ypred, y) -> Tensor:
+        return torch.mean((ypred - y) ** 2)
+    
+class ReLU(ModelBase):
+    def forward(self, x: Tensor) -> Tensor:
+        return torch.relu(x)
+    
+class Sigmoid(ModelBase):
+    def forward(self, x: Tensor) -> Tensor:
+        return torch.sigmoid(x)
 
-# A leaky sigmoid function
-class NotSigmoid(nn.Module):
+class LeakySigmoid(ModelBase):
     def __init__(self, in_size):
-        super().__init__()
         self.leak = nn.Linear(in_size, 1)
 
     def forward(self, x):
@@ -54,7 +81,7 @@ class NotSigmoid(nn.Module):
         return leakage * x + torch.sigmoid(x)
     
 # Does nothing but to make code more readable
-class Identity(nn.Module):
+class Identity(ModelBase):
     def forward(self, x):
         return x
     
@@ -95,10 +122,8 @@ class StochasticNode(nn.Module):
 
         return z
 
-# Idk why I cant get an LSTM layer to work except like this
-class LSTMLayer(nn.Module):
+class LSTMLayer(ModelBase):
     def __init__(self, input_dims, hidden_dims, output_dims, *, layers = 2):
-        super().__init__()
         self.lstm = nn.LSTM(input_size=input_dims, hidden_size=hidden_dims, num_layers = layers)
         self.linear = nn.Linear(hidden_dims, output_dims)
 
@@ -108,201 +133,35 @@ class LSTMLayer(nn.Module):
         out, _ = self.lstm(x)
         out = self.linear(out.view(len(x), -1))
         return out
+
+class TrainedLinear(ModelBase):
+    def __init__(self, in_size, out_size):
+        self._trained = False
+        self.coefs = nn.Parameter(torch.zeros(in_size, out_size), requires_grad=False)
+        self.intercept = nn.Parameter(torch.zeros(out_size), requires_grad=False)
     
-class VAEModule(nn.Module, ABC):
-    """Interface for VAE Modules"""
-    @virtual
-    def forward(self, x):
-        raise NotImplementedError
-
-    @virtual
-    def get_kl_divergence(self):
-        raise NotImplementedError
-    
-    @virtual
-    def encode(self, x):
-        raise NotImplementedError
-    
-    @virtual
-    def decode(self, x):
-        raise NotImplementedError
-
-    def get_latent_dims(self) -> int:
-        raise NotImplementedError
-
-
-class PoissonVAE(VAEModule):
-    def __init__(self, latent: int) -> None:
-        super().__init__()
-        self.encoder = nn.Sequential(
-            nn.Linear(4386, 512),
-            Identity(),
-            nn.Linear(512, 64),
-            nn.Tanh(),
-            nn.Linear(64, 16),
-            nn.Tanh()
-        )
-
-        self.latent = latent
-
-        self.stochastic_node = StochasticNode(16, latent)
-
-        self.decoder = nn.Sequential(
-            nn.Linear(latent, 16),
-            nn.Tanh(),
-            nn.Linear(16, 64),
-            nn.Tanh()
-        )
-
-        self.ep_decode = nn.Sequential(
-            nn.Linear(64, 256),
-            nn.Sigmoid(),
-            nn.Linear(256, 2193),
-            nn.Sigmoid()
-        )
-
-        self.sc_decode = nn.Sequential(
-            nn.Linear(64, 256),
-            NotSigmoid(256),
-            nn.Linear(256, 2193),
-            NotSigmoid(2193)
-        )
-
-    def encode(self, x):
-        x = self.encoder(x)
-        x = self.stochastic_node(x)
-        return x
-    
-    def decode(self, x):
-        x = self.decoder(x)
-        ep = self.ep_decode(x)
-        sc = self.sc_decode(x)
-        x = torch.cat([ep, sc], dim = -1)
-        return x
-
-    def forward(self, x):
-        x = self.encode(x)
-        x = self.decode(x)
-        return x
-    
-    def get_kl_divergence(self):
-        return self.stochastic_node.kl
-    
-    def get_latent_dims(self) -> int:
-        return self.latent
-    
-class PoissonVAE2(VAEModule):
-    def __init__(self, latent) -> None:
-        super().__init__()
-        self.encoder = nn.Sequential(
-            LSTMLayer(4386, 1000, 512),
-            NotSigmoid(512),
-            LSTMLayer(512, 128, 64),
-            nn.Tanh(),
-            nn.Linear(64, 16),
-            nn.Tanh()
-        )
-
-        self.latent = latent
-
-        self.stochastic_node = StochasticNode(16, latent)
-
-        self.decoder = nn.Sequential(
-            nn.Linear(latent, 16),
-            nn.Tanh(),
-            nn.Linear(16, 64),
-            nn.Tanh()
-        )
-
-        self.ep_decode = nn.Sequential(
-            nn.Linear(64, 256),
-            nn.Sigmoid(),
-            nn.Linear(256, 2193),
-            nn.Sigmoid()
-        )
-
-        self.sc_decode = nn.Sequential(
-            nn.Linear(64, 256),
-            NotSigmoid(256),
-            nn.Linear(256, 2193),
-            NotSigmoid(2193)
-        )
-
-    def encode(self, x):
-        x = self.encoder(x)
-        x = self.stochastic_node(x)
-        return x
-    
-    def decode(self, x):
-        x = self.decoder(x)
-        ep = self.ep_decode(x)
-        sc = self.sc_decode(x)
-        x = torch.cat([ep, sc], dim = -1)
-        return x
-
-    def forward(self, x):
-        x = self.encode(x)
-        x = self.decode(x)
-        return x
-    
-    def get_kl_divergence(self):
-        return self.stochastic_node.kl
-    
-    def get_latent_dims(self) -> int:
-        return self.latent
-    
-class SymmetricNN(nn.Module):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.fc = nn.Sequential(
-            nn.Linear(1, 10),
-            nn.Sigmoid(),
-            nn.Linear(10, 100),
-            nn.Sigmoid(),
-            nn.Linear(100, 17 * 72),
-            nn.Sigmoid()
-        )
-        self.x_spacing = load_spacing()[0]
-        self.device = get_device()
-
-    def forward(self, x: Tensor):
-        x = self.fc(x)
-        x = x.reshape(-1, 72, 17)
-        total = 0.078
+    def fit(self, x: Tensor, y: Tensor):
+        num_features = x.shape[1]
+        num_tasks = y.shape[1]
+        if num_features != self.coefs.shape[0]:
+            raise ValueError(f"Incorrect in_size. Expected {self.coefs.shape[0]} but got {num_features}")
         
-        target = torch.zeros(x.shape[0], 129, 17).to(self.device).double()
-        target[:, :72, :] = x
+        if num_tasks != self.coefs.shape[1]:
+            raise ValueError(f"Incorrect out_size. Expected {self.coefs.shape[1]} but got {num_tasks}")
 
-        for j in range(72, 129):
-            x_pos = total - self.x_spacing[j]
-
-            # Use normal flip near the edges
-            if total - x_pos < 0.02:
-                col = torch.abs(x_pos - self.x_spacing).argmin()
-                target[:, j, :] = x[:, col, :]
-                continue
-            
-            # Use lerp near the center
-            col1 = torch.searchsorted(self.x_spacing, x_pos, side='right') - 1
-            col2 = col1 + 1
-            weighting = (self.x_spacing[col2] - x_pos)/(self.x_spacing[col2] - self.x_spacing[col1])
-            target[:, j, :] = weighting * x[:, col1, :] + (1-weighting) * x[:, col2, :]
+        with torch.no_grad():
+            for i in range(num_tasks):
+                xtrain = x.cpu().numpy()
+                ytrain = y[:, i].cpu().numpy()
+                model = TheilSenRegressor().fit(xtrain, ytrain)
+                self.coefs[:, i] = torch.tensor(model.coef_)
+                self.intercept[i] = torch.tensor(model.intercept_)
         
-        return target.reshape(-1, 2193)
-
-class VAENet1(nn.Module):
-    def __init__(self, mod):
-        super().__init__()
-        self.net: VAEModule = mod
-        for p in self.net.parameters():
-            p.requires_grad = False
-        self.fc = nn.Sequential(
-            nn.Linear(1, 3),
-            nn.Linear(3, 5)
-        )
-
+        self._trained = True
+        return self
+    
     def forward(self, x):
-        self.net.eval()
-        x = self.fc(x)
-        x = self.net.decode(x)
+        self.eval()
+        x = x @ self.coefs + self.intercept
         return x
+

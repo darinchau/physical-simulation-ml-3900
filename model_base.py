@@ -7,6 +7,7 @@ import pickle
 
 # Overload nn module for a high-level api for myself
 class Model(nn.Module):
+    """Base class for all models/model layers etc"""
     def __new__(cls, *args, **kwargs):
         self = super(Model, cls).__new__(cls)
         # Calls super init here so that no one forgets
@@ -104,15 +105,14 @@ class Model(nn.Module):
     
     def __repr__(self):
         line =  "=" * 100
-        return f"""Model summary:
+        return f"""{self._class_name()}\nModel summary:
 {line}
 {self._get_model_info(0)}
 {line}
 """
-        
-    
+
 class ModelBase(Model):
-    """Models base objects are layers directly inherited from pytorch. The only difference is serialize should give the state dict"""
+    """Models base objects are layers directly inherited from pytorch. Serialize gives state dict and there are no module children for us to loop over"""
     def _serialize(self) -> dict:
         return self.state_dict()
     
@@ -124,3 +124,10 @@ class ModelBase(Model):
     
     def _num_nontrainable(self) -> int:
         return sum(p.numel() for p in self.parameters() if not p.requires_grad)
+
+    def _get_model_info(self, layers: int):
+        s = "- " * layers + f"{self._class_name()} (Trainable: {self._num_trainable()}, Other: {self._num_nontrainable()})"
+        return s
+    
+    def _model_children(self):
+        raise StopIteration
