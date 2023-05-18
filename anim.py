@@ -9,6 +9,8 @@ from torch import Tensor
 import torch
 from derivative import poisson_rmse
 from numpy.typing import NDArray
+from sklearn.linear_model import TheilSenRegressor
+import util
 
 # A class wrapper to help us plot data. We assume all error checking has been done
 class AnimationMaker:
@@ -24,7 +26,7 @@ class AnimationMaker:
         else:
             assert len(data) == self.nframes
 
-        data = np.array(data)
+        data = util.array(data)
         
         if vmin is None:
             vmin = np.min(data)
@@ -182,11 +184,20 @@ def make_anim(predicted_data, original_data, path = None, title = None):
     a1.save(path, title)
     a2.save(f"{path[:-4]} debug.gif", title + " debug")
 
-# Helper function to extract the middle region and outer region
-OUTER_REGION_WIDTH = 40
+# Space charge has a weird structure
+# --------------------------------------------------------------------
+# -                                                                  -
+# -       Region 4                Region 5            Region 6       -
+# -                       44 45              83 84                   -
+# 10 -----------------------                    ----------------------
+# -                        -                    -                    -
+# -       Region 1         -      Region 2      -      Region 3      -
+# -                        -                    -                    -
+# --------------------------------------------------------------------
+# mid means region 2, 5
 def split_mid_outer(data):
-    middle = data[:, OUTER_REGION_WIDTH:-OUTER_REGION_WIDTH, :]
-    outer = np.concatenate([data[:, :OUTER_REGION_WIDTH, :], data[:, -OUTER_REGION_WIDTH:, :]], axis=1)
+    middle = data[:, 45:84, :]
+    outer = np.concatenate([data[:, :45, :], data[:, 84:, :]], axis=1)
     return middle, outer
         
 # Wrapper for static plots maker
@@ -240,7 +251,7 @@ def make_plots(path, model_name = None, include_keys: list[str] | None = None):
     frame_mid_potential = StaticPlotMaker()
     
     # Loop through keys of the file and print them
-    original_data = np.array(load_elec_potential())
+    original_data = util.array(load_elec_potential())
     data_mid, data_outer = split_mid_outer(original_data)
     
     # Plot the middle potential for the original data
@@ -298,35 +309,16 @@ def make_plots(path, model_name = None, include_keys: list[str] | None = None):
         frame_rmse_outer.plot(f"{model_name} Outer RMSE", path)
         frame_mid_potential.plot(f"{model_name} mid potential", path, title = f"Electric potential of gate region from {model_name}")
 
-# Feed in model name, show the interactive data visualizer
-# Include keys is the plots to include. Defaults to None which means to include every plot
-def visualize_data(path: str, include_keys: list[str] | None = None):    
-    d = DataVisualizer()
-    with h5py.File(f"{path}/predictions.h5", 'r') as f:
-        # Make a customary error message if we happen to make a typo in the list
-        if include_keys is not None:
-            for key in include_keys:
-                if key not in f.keys():
-                    print(f"The key {key} is not found in the file.")
-        
-        for key in f.keys():
-            if include_keys is not None and key not in include_keys:
-                continue
-            d.add_data(f[key]["data"][:], key)
-    
-    d.add_data(load_elec_potential(), "Original", thickness=3)
-    d.show()
-
 class DataVisualizer:
     def __init__(self, cover = None) -> None:
         self.datas = {}
         if cover is None:
-            self.cover = load_elec_potential()
+            self.datas["Original"] = (util.array(load_elec_potential()), 3)
         else:
-            self.cover = np.array(cover)
+            self.datas["Original"] = (util.array(cover), 3)
     
-    def add_data(self, data, name, thickness = 1.5):
-        self.datas[name] = (np.array(data), thickness)
+    def add_data(self, data, name):
+        self.datas[name] = (util.array(data), 1)
     
     def show(self):        
         # Load the spacing
@@ -362,8 +354,9 @@ class DataVisualizer:
                 
                 if k == "Original":
                     continue
-
-                orig_v = self.cover[:, col, row]
+                
+                cover = self.datas["Original"][0]
+                orig_v = cover[:, col, row]
                 ax[1].plot(np.abs(values - orig_v), label = k)
             
             ax[1].set_xlabel("Array index")
@@ -376,7 +369,14 @@ class DataVisualizer:
             
             ax[1].set_yscale('log')
             
-            ax[2].text(0, 0.5, f"Cell ({row}, {col}), Position: x = {event.xdata}, y = {event.ydata}", ha="left", va="center", fontsize=9)
+            # Make the text
+            y = self.datas["Original"][0][:, col, row]
+            r_score = util.straight_line_score(y)
+
+            coord_info = f"Cell ({row}, {col}), Position: x = {event.xdata:.5f}, y = {event.ydata:.5f}"
+            line_info = f"Straightness of original: {r_score:.5f}"
+
+            ax[2].text(0, 0.5, "\n".join([coord_info, line_info]), ha="left", va="center", fontsize=9)
             ax[2].set_axis_off()
             
             fig.tight_layout()
@@ -385,14 +385,16 @@ class DataVisualizer:
         # Create the heatmap
         fig, ax = plt.subplots()
 
+        cover = self.datas["Original"][0]
+
         ax.set_aspect("equal", adjustable="box")
         ax.set_ylabel("Y", va="bottom")
         ax.set_yticks([])
-        heatmap = ax.pcolormesh(x_grid, y_grid, np.transpose(self.cover[0]), cmap="hot", vmin = np.min(self.cover), vmax = np.max(self.cover))
+        heatmap = ax.pcolormesh(x_grid, y_grid, np.transpose(cover[0]), cmap="hot", vmin = np.min(cover), vmax = np.max(cover))
 
         cbar = fig.colorbar(heatmap, ax=ax)
         cbar.ax.set_ylabel("Intensity", rotation=-90, va="bottom")
-        tk = np.round(np.linspace(np.min(self.cover), np.max(self.cover), 4, endpoint=True), 2)
+        tk = np.round(np.linspace(np.min(cover), np.max(cover), 4, endpoint=True), 2)
         cbar.set_ticks(tk)
 
         # Add a title
@@ -410,7 +412,7 @@ def log_diff(x, y):
         err_log_10 = torch.log10(error)
         try:
             t = torch.min(err_log_10[error > 0])
-            err_log_10[error < 1e-20] = t
+            err_log_10[error <= 0] = t
             return err_log_10, float(t)
         except ValueError as e:
             pass
@@ -419,7 +421,7 @@ def log_diff(x, y):
         err_log_10 = np.log10(error)
         try:
             t = float(np.min(err_log_10[error > 0]))
-            err_log_10[error < 1e-20] = t
+            err_log_10[error <= 0] = t
             return err_log_10, t
         except ValueError as e:
             pass

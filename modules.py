@@ -7,11 +7,14 @@ from load import load_spacing, get_device
 from derivative import poisson_mse_, normalized_poisson_mse_
 from abc import ABC, abstractmethod as virtual
 from model_base import Model, ModelBase
-from sklearn.linear_model import TheilSenRegressor
+from sklearn.linear_model import TheilSenRegressor, LinearRegression
+from util import straight_line_model
 
 class Sequential(Model):
     """Sequential model"""
     def __init__(self, *f):
+        for model in f:
+            assert isinstance(model, Model)
         self.fs = f
 
     def forward(self, x):
@@ -21,7 +24,6 @@ class Sequential(Model):
     
     def _model_children(self):
         for i, model in enumerate(self.fs):
-            assert isinstance(model, Model)
             yield str(i), model
     
     def _deserialize(self, state: dict):
@@ -85,20 +87,22 @@ class Identity(ModelBase):
     def forward(self, x):
         return x
     
-class StochasticNode(nn.Module):
-    def __init__(self, input, output):
+class StochasticNode(Model):
+    """Stochastic node for VAE. The output is inherently random. Specify the device if needed"""
+    def __init__(self, in_size, out_size, *, device = None):
         super().__init__()
 
         # Use tanh for mu to constrain it around 0
-        self.lmu = nn.Linear(input, output)
+        self.lmu = nn.Linear(in_size, out_size)
         self.smu = nn.Tanh()
 
         # Use sigmoid for sigma to constrain it to positive values and around 1
-        self.lsi = nn.Linear(input, output)
+        self.lsi = nn.Linear(in_size, out_size)
         self.ssi = nn.Sigmoid()
 
         # Move device to cuda if possible
-        device = get_device()
+        if device is None:
+            device = get_device()
         self.N = torch.distributions.Normal(torch.tensor(0).float().to(device), torch.tensor(1).float().to(device))
         self.kl = torch.tensor(0)
 
@@ -122,7 +126,7 @@ class StochasticNode(nn.Module):
 
         return z
 
-class LSTMLayer(ModelBase):
+class LSTM(ModelBase):
     def __init__(self, input_dims, hidden_dims, output_dims, *, layers = 2):
         self.lstm = nn.LSTM(input_size=input_dims, hidden_size=hidden_dims, num_layers = layers)
         self.linear = nn.Linear(hidden_dims, output_dims)
@@ -135,10 +139,13 @@ class LSTMLayer(ModelBase):
         return out
 
 class TrainedLinear(ModelBase):
-    def __init__(self, in_size, out_size):
+    def __init__(self, in_size, out_size, algorithm = 'TheilSen'):
         self._trained = False
         self.coefs = nn.Parameter(torch.zeros(in_size, out_size), requires_grad=False)
         self.intercept = nn.Parameter(torch.zeros(out_size), requires_grad=False)
+
+        # algorithms
+        self.model = straight_line_model(algorithm)
     
     def fit(self, x: Tensor, y: Tensor):
         num_features = x.shape[1]
@@ -153,7 +160,7 @@ class TrainedLinear(ModelBase):
             for i in range(num_tasks):
                 xtrain = x.cpu().numpy()
                 ytrain = y[:, i].cpu().numpy()
-                model = TheilSenRegressor().fit(xtrain, ytrain)
+                model = self.model.fit(xtrain, ytrain)
                 self.coefs[:, i] = torch.tensor(model.coef_)
                 self.intercept[i] = torch.tensor(model.intercept_)
         
@@ -161,6 +168,9 @@ class TrainedLinear(ModelBase):
         return self
     
     def forward(self, x):
+        if not self._trained:
+            raise ValueError("Trained linear layer has not been trained.")
+
         self.eval()
         x = x @ self.coefs + self.intercept
         return x
