@@ -4,41 +4,56 @@ from __future__ import annotations
 import torch
 from torch import nn, Tensor
 import pickle
+from typing import Self
 
 # Overload nn module for a high-level api for myself
 class Model(nn.Module):
     """Base class for all models/model layers etc"""
+
     def __new__(cls, *args, **kwargs):
         self = super(Model, cls).__new__(cls)
         # Calls super init here so that no one forgets
         super().__init__(self)
+
         self._init_args = args
         self._init_kwargs = kwargs
+
+        # One of the points of doing this is to not call super().__init__() every time when we define our own module
+        # So interrupt stuff here
+        self._freezed = False
+
         try:
             self.forward()
         except NotImplementedError:
             raise AttributeError("Forward method not found")
         except Exception as e:
+            # Not the place to raise exceptions here
             pass
+        
         return self
     
     def forward(self, *x: Tensor) -> Tensor:
         raise NotImplementedError
+    
+    def __init__(self):
+        """Creates a new model that can be combined with other models to form bigger models. :)"""
+        pass
     
     # A recursive save
     def _serialize(self) -> dict:
         state = {}
         for objname, obj in self._model_children():
             state[objname] = obj._serialize()
-        state["_init_=args"] = self._init_args
-        state["_init_=kwargs"] = self._init_kwargs
+        state["_=freezed"] = self._freezed
         return state
     
     def _deserialize(self, state: dict):
         for k, v in state.items():
-            if k in ("_init_=args", "_init_=kwargs"):
+            if "_=" in k:
                 continue
             self.__getattr__(k)._deserialize(v)
+        if state["_=freezed"]:
+            self.freeze()
         return self
     
     def _model_children(self):
@@ -55,11 +70,13 @@ class Model(nn.Module):
     def save(self, path: str):
         """Save the model file. We suggest to use the '.hlpt' extension for high-level pytorch"""
         state = self._serialize()
+        state["_init_=args"] = self._init_args
+        state["_init_=kwargs"] = self._init_kwargs
         with open(path, 'wb') as f:
             pickle.dump(state, f)
 
     @classmethod
-    def load(cls, path: str) -> Model:
+    def load(cls, path: str) -> Self:
         with open(path, 'rb') as f:
             state = pickle.load(f)
         self = cls(*state["_init_=args"], **state["_init_=kwargs"])
@@ -111,13 +128,30 @@ class Model(nn.Module):
 {line}
 """
 
+    def freeze(self):
+        """Freezes the model so it is no longer trainable"""
+        self._freezed = True
+        for p in self.parameters():
+            p.requires_grad = False
+
+    def __call__(self, x):
+        if self._freezed:
+            self.eval()
+        
+        return super().__call__(x)
+
 class ModelBase(Model):
     """Models base objects are layers directly inherited from pytorch. Serialize gives state dict and there are no module children for us to loop over"""
     def _serialize(self) -> dict:
-        return self.state_dict()
+        return {
+            "state_dict": self.state_dict(),
+            "_=freezed": self._freezed
+        }
     
     def _deserialize(self, state: dict):
-        self.load_state_dict(state)
+        self.load_state_dict(state["state_dict"])
+        if state["_=freezed"]:
+            self.freeze()
 
     def _num_trainable(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
@@ -131,3 +165,73 @@ class ModelBase(Model):
     
     def _model_children(self):
         raise StopIteration
+
+
+##### Tests #####
+import os
+import random
+
+class LinearTestModel(ModelBase):
+    def __init__(self, ins, outs):
+        self.fc = nn.Linear(ins, outs)
+    
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.fc(x)
+        return x
+    
+class LinearTestModel2(Model):
+    def __init__(self, linear):
+        self.fc = linear
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.fc(x)
+        return x
+    
+def test():
+    a = LinearTestModel(100, 200)
+    t = torch.randn(178, 100)
+    b = a(t)
+    assert b.shape == (178, 200)
+
+    j = random.randint(0, 10000)
+    path = f"./temp_model_test{j}"
+
+    print("Test 1 passed")
+
+    a.save(path)
+    a2 = LinearTestModel.load(path)
+    c = a2(t)
+    assert c.shape == (178, 200)
+    assert torch.all(b == c)
+    os.remove(path)
+
+    print("Test 2 passed")
+
+    a3 = LinearTestModel2(a)
+    c = a3(t)
+    assert c.shape == (178, 200)
+    assert torch.all(b == c)
+
+    print("Test 3 passed")
+
+    a3.save(path)
+    a4 = LinearTestModel2.load(path)
+    c = a4(t)
+    assert c.shape == (178, 200)
+    assert torch.all(b == c)
+    os.remove(path)
+
+    print("Test 4 passed")
+
+    a4.fc.freeze()
+    a4.save(path)
+    a5 = LinearTestModel2.load(path)
+    assert a5.fc._freezed
+    os.remove(path)
+
+    print("Test 5 passed")
+
+    
+
+if __name__ == "__main__":
+    test()

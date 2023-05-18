@@ -371,7 +371,7 @@ class DataVisualizer:
             
             # Make the text
             y = self.datas["Original"][0][:, col, row]
-            r_score = util.straight_line_score(y)
+            r_score = util.straight_line_score_normalizing(y)
 
             coord_info = f"Cell ({row}, {col}), Position: x = {event.xdata:.5f}, y = {event.ydata:.5f}"
             line_info = f"Straightness of original: {r_score:.5f}"

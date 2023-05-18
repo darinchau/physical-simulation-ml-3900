@@ -46,8 +46,9 @@ class PoissonLoss(ModelBase):
     """Gives the poisson equation - the value of ||∇²φ - (-q)S||
     where S is the space charge described in p265 of the PDF 
     https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
-    def __init__(self):
-        device = get_device()
+    def __init__(self, device = None):
+        if device is None:
+            device = get_device()
         x, y = load_spacing()
         self.x = x.to(device)
         self.y = y.to(device)

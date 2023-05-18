@@ -75,8 +75,8 @@ def array(d: torch.Tensor | NDArray) -> NDArray:
             return d.cpu().numpy()
     return np.array(d)
 
-def straight_line_score(y, algorithm = 'linear') -> float:
-    """Measures how close the given plots resemble a linear relationship. This measurement is invariant to scaling"""
+def straight_line_score_normalizing(y, algorithm = 'linear') -> float:
+    """Measures how close the given plots resemble a linear relationship. This measurement is invariant to scaling but as a result tiny errors can result in big differences"""
     len_y, = y.shape
     y = array(y)
 
@@ -90,3 +90,18 @@ def straight_line_score(y, algorithm = 'linear') -> float:
     yp = model.predict(x)
     r_score = 1 - np.sqrt(np.mean((yp - y_normalized) ** 2))
     return float(r_score)
+
+def straight_line_score(y, algorithm = 'linear') -> float:
+    """Measures how close the given plots resemble a linear relationship. This is calculated as 1/(1 + RMSE)"""
+    len_y, = y.shape
+    y = array(y)
+
+    # Early exit if horizontal y
+    if np.min(y) == np.max(y):
+        return 1
+    
+    x = np.linspace(0, 1, len_y, endpoint=True).reshape(-1, 1)
+    model = straight_line_model(algorithm).fit(x, y)
+    yp = model.predict(x)
+    r_score = np.sqrt(np.mean((yp - y) ** 2))
+    return float(1/(1+r_score))
