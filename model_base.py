@@ -9,11 +9,10 @@ from load import get_device
 import matplotlib.pyplot as plt
 from tqdm import trange
 import time
+from abc import ABC, abstractmethod as virtual
 
-# Overload nn module for a high-level api for myself
-class Model(nn.Module):
-    """Base class for all models/model layers etc"""
-
+class Model(ABC):
+    """Abstract class for all models/model layers etc"""
     def __new__(cls, *args, **kwargs):
         self = super(Model, cls).__new__(cls)
         # Calls super init here so that no one forgets
@@ -36,6 +35,7 @@ class Model(nn.Module):
         
         return self
     
+    @virtual
     def forward(self, *x: Tensor) -> Tensor:
         raise NotImplementedError
     
@@ -61,7 +61,7 @@ class Model(nn.Module):
         return self
     
     def _model_children(self):
-        """Return a generator of all children model"""
+        """Return a generator of (object name, all children model). This is not recursive"""
         for objname in dir(self):
             try:
                 obj = self.__getattr__(objname)
@@ -138,15 +138,15 @@ class Model(nn.Module):
     def freeze(self):
         """Freezes the model so it is no longer trainable"""
         self._freezed = True
-        for p in self.parameters():
-            p.requires_grad = False
+        for _, p in self._model_children():
+            p.freeze()
         return self
 
     def __call__(self, *x):
         if self._freezed:
             self.eval()
         
-        return super().__call__(*x)
+        return self.forward(*x)
     
 class Trainer(Model):
     """A special type of model designed to train other models. This provides the `self.history` attribute in which one can log the losses"""
@@ -219,7 +219,7 @@ class History:
     def plot(self, root: str, name: str):
         fig, ax = plt.subplots()
         for name in self.names:
-            x, y = [], [], [], []
+            x, y = [], []
             for i, losses in enumerate(self.losses):
                 if name in losses:
                     x.append(i)
@@ -306,31 +306,46 @@ def fit(
     return net
 
 class ModelBase(Model):
-    """Models base objects are layers directly inherited from pytorch. Serialize gives state dict and there are no module children for us to loop over"""
+    """Models base objects are layers directly from pytorch. One must define the model that it is trying to inherit. Serialize gives state dict and there are no module children for us to loop over"""
+    @property
+    @virtual
+    def model(self) -> nn.Module:
+        """Returns (a reference to) the model"""
+        raise NotImplementedError
+    
     def _serialize(self) -> dict:
         return {
-            "state_dict": self.state_dict(),
+            "state_dict": self.model.state_dict(),
             "_=freezed": self._freezed
         }
     
     def _deserialize(self, state: dict):
-        self.load_state_dict(state["state_dict"])
+        self.model.load_state_dict(state["state_dict"])
         if state["_=freezed"]:
             self.freeze()
 
+    def freeze(self):
+        self._freezed = True
+        for x in self.model.parameters():
+            x.requires_grad = False
+
     def _num_trainable(self) -> int:
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+        return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
     
     def _num_nontrainable(self) -> int:
-        return sum(p.numel() for p in self.parameters() if not p.requires_grad)
+        return sum(p.numel() for p in self.model.parameters() if not p.requires_grad)
 
     def _get_model_info(self, layers: int):
         s = "- " * layers + f"{self._class_name()} (Trainable: {self._num_trainable()}, Other: {self._num_nontrainable()})"
         return s
     
     def _model_children(self):
-        raise StopIteration
-
+        raise NotImplementedError("Model children is not recursive in nature. One must implement all base cases if one inherits from model base")
+    
+    def forward(self, x: Tensor) -> Tensor:
+        m = self.model
+        x = m(x)
+        return x
 
 ##### Tests #####
 import os
@@ -339,10 +354,10 @@ import random
 class LinearTestModel(ModelBase):
     def __init__(self, ins, outs):
         self.fc = nn.Linear(ins, outs)
-    
-    def forward(self, x: Tensor) -> Tensor:
-        x = self.fc(x)
-        return x
+
+    @property
+    def model(self) -> nn.Module:
+        return self.fc
     
 class LinearTestModel2(Model):
     def __init__(self, linear):
@@ -350,6 +365,15 @@ class LinearTestModel2(Model):
 
     def forward(self, x: Tensor) -> Tensor:
         x = self.fc(x)
+        return x
+
+class LinearTestModel3(Model):
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
+    def forward(self, *x: Tensor) -> Tensor:
+        x = self.a(x)
         return x
     
 def test():
@@ -395,6 +419,19 @@ def test():
     os.remove(path)
 
     print("Test 5 passed")
+
+    a6 = LinearTestModel3(a, a3)
+    c = a6(t)
+    assert c.shape == (178, 200)
+    assert torch.all(b == c)
+
+    a6.save(path)
+    a7 = LinearTestModel3.load(path)
+    c = a7(t)
+    assert c.shape == (178, 200)
+    assert torch.all(b == c)
+
+    print("Test 6 passed")
 
 if __name__ == "__main__":
     test()

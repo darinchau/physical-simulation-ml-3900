@@ -119,16 +119,12 @@ class TrainingIndex(tuple):
         # tensor([[ 4,  5,  6,  7],
         #         [ 8,  9, 10, 11],
         #         [12, 13, 14, 15]])
-        self = super().__new__(cls, [range(start, stop)])
+        self = super().__new__(cls, (tuple(range(start, stop)),))
         self.name = name
         return self
 
     def include(self):
         return list(range(self.start, self.stop))
-    
-    # Overload iter so it produces a bunch of ints as desired
-    def __iter__(self) -> Iterator:
-        return self[0].__iter__()
 
 TRAINING_IDXS = [
     TrainingIndex("First 5", 0, 5),
