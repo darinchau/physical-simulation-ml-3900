@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 import gc
 import torch
 from numpy.typing import NDArray
@@ -105,3 +106,43 @@ def straight_line_score(y, algorithm = 'linear') -> float:
     yp = model.predict(x)
     r_score = np.sqrt(np.mean((yp - y) ** 2))
     return float(1/(1+r_score))
+
+# A wrapper class for training indices. Originally we make this inherit from slice so we can directly index them into tensors
+# But slice is a final object so we use a workaround to subclass from tuple instead
+# But this is hacky workaround dont do this
+class TrainingIndex(tuple):
+    def __new__(cls, name: str, start: int, stop: int, /):
+        # We use a list of a single range because this code works
+        # import torch
+        # a = torch.arange(16).reshape(4,4)
+        # a[((1, 2, 3),)]
+        # tensor([[ 4,  5,  6,  7],
+        #         [ 8,  9, 10, 11],
+        #         [12, 13, 14, 15]])
+        self = super().__new__(cls, [range(start, stop)])
+        self.name = name
+        return self
+
+    def include(self):
+        return list(range(self.start, self.stop))
+    
+    # Overload iter so it produces a bunch of ints as desired
+    def __iter__(self) -> Iterator:
+        return self[0].__iter__()
+
+TRAINING_IDXS = [
+    TrainingIndex("First 5", 0, 5),
+    TrainingIndex("First 20", 0, 20),
+    TrainingIndex("First 30", 0, 30),
+    TrainingIndex("First 40", 0, 40),
+    TrainingIndex("First 60", 0, 60),
+    TrainingIndex("First 75", 0, 75),
+    TrainingIndex("First 90", 0, 90),
+    TrainingIndex("15 to 45", 15, 45),
+    TrainingIndex("20 to 40", 20, 40),
+    TrainingIndex("40 to 60", 40, 60),
+    TrainingIndex("25 to 35", 25, 35),
+    TrainingIndex("20 to 50", 20, 50),
+    TrainingIndex("30 to 50", 30, 50),
+    TrainingIndex("29 and 30 and 31", 29, 32)
+]

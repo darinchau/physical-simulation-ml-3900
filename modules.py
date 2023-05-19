@@ -42,7 +42,7 @@ class Linear(ModelBase):
         x = self.fc(x)
         return x
 
-class PoissonLoss(ModelBase):
+class PoissonMSE(ModelBase):
     """Gives the poisson equation - the value of ||∇²φ - (-q)S||
     where S is the space charge described in p265 of the PDF 
     https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
@@ -56,12 +56,19 @@ class PoissonLoss(ModelBase):
     def forward(self, x, space_charge):
         return poisson_mse_(x, space_charge, self.x, self.y)
 
-class NormalizedPoissonMSE(PoissonLoss):
+class NormalizedPoissonMSE(PoissonMSE):
     """Normalized means we assume space charge has already been multiplied by -q
     Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
     where S is the space charge described in p265 of the PDF+"""    
     def forward(self, x, space_charge):
         return normalized_poisson_mse_(x, space_charge, self.x, self.y)
+    
+class NormalizedPoissonRMSE(PoissonMSE):
+    """Normalized means we assume space charge has already been multiplied by -q
+    Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
+    where S is the space charge described in p265 of the PDF+"""    
+    def forward(self, x, space_charge):
+        return torch.sqrt(normalized_poisson_mse_(x, space_charge, self.x, self.y))
     
 class MSELoss(ModelBase):
     def forward(self, ypred, y) -> Tensor:
@@ -166,13 +173,12 @@ class TrainedLinear(ModelBase):
                 self.intercept[i] = torch.tensor(model.intercept_)
         
         self._trained = True
+        self.freeze()
         return self
     
     def forward(self, x):
         if not self._trained:
             raise ValueError("Trained linear layer has not been trained.")
-
-        self.eval()
         x = x @ self.coefs + self.intercept
         return x
 

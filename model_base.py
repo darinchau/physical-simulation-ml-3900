@@ -4,7 +4,9 @@ from __future__ import annotations
 import torch
 from torch import nn, Tensor
 import pickle
-from typing import Self
+from typing import Optional, Self
+
+from torch.nn.modules.module import Module
 
 # Overload nn module for a high-level api for myself
 class Model(nn.Module):
@@ -120,7 +122,7 @@ class Model(nn.Module):
             s += model._get_model_info(layers + 1)
         return s
     
-    def __repr__(self):
+    def summary(self):
         line =  "=" * 100
         return f"""{self._class_name()}\nModel summary:
 {line}
@@ -128,17 +130,21 @@ class Model(nn.Module):
 {line}
 """
 
+    def __repr__(self):
+        return self._class_name()
+
     def freeze(self):
         """Freezes the model so it is no longer trainable"""
         self._freezed = True
         for p in self.parameters():
             p.requires_grad = False
+        return self
 
-    def __call__(self, x):
+    def __call__(self, *x):
         if self._freezed:
             self.eval()
         
-        return super().__call__(x)
+        return super().__call__(*x)
 
 class ModelBase(Model):
     """Models base objects are layers directly inherited from pytorch. Serialize gives state dict and there are no module children for us to loop over"""
@@ -206,7 +212,7 @@ def test():
     os.remove(path)
 
     print("Test 2 passed")
-
+    
     a3 = LinearTestModel2(a)
     c = a3(t)
     assert c.shape == (178, 200)
@@ -230,8 +236,6 @@ def test():
     os.remove(path)
 
     print("Test 5 passed")
-
-    
 
 if __name__ == "__main__":
     test()

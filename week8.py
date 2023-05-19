@@ -13,7 +13,7 @@ Q = 1.60217663e-19
 
 ## This module contains everything miscellaneous generated during week 8
 # I am now curious how "straight" is each region. 
-def straight_line_score(data, algorithm, normalize = True):
+def straight_line_score(data, algorithm = 'linear', normalize = True):
     data = util.array(data)
     result = np.zeros((129, 17))
     for i in range(129):
@@ -65,3 +65,14 @@ def plot_two_heatmaps(a, b):
 
     fig.suptitle("Straight line score of plots")
     fig.show()
+
+if __name__ == "__main__":
+    sc = load_space_charge() * -Q
+    ep = load_elec_potential()
+    
+    sc_scores = straight_line_score(sc, normalize = False).T
+    ep_scores = straight_line_score(ep, normalize = False).T
+    log_sc = np.log10(np.ones_like(sc_scores) + 1e-10 - sc_scores)
+    log_ep = np.log10(np.ones_like(ep_scores) + 1e-10 - ep_scores)
+
+    plot_two_heatmaps(log_sc, log_ep)

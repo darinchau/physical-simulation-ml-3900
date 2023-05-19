@@ -179,8 +179,10 @@ def make_anim(predicted_data, original_data, path = None, title = None):
         path = f"./{time.time_ns()}.gif"
     if title is None:
         title = "Animation"
-    a1 = make_dem_animation(predicted_data, original_data)
-    a2 = make_debug_animation(predicted_data, original_data)
+    ypred = util.array(predicted_data)
+    ytest = util.array(original_data)
+    a1 = make_dem_animation(ypred, ytest)
+    a2 = make_debug_animation(ypred, ytest)
     a1.save(path, title)
     a2.save(f"{path[:-4]} debug.gif", title + " debug")
 
@@ -188,7 +190,7 @@ def make_anim(predicted_data, original_data, path = None, title = None):
 # --------------------------------------------------------------------
 # -                                                                  -
 # -       Region 4                Region 5            Region 6       -
-# -                       44 45              83 84                   -
+# 11                      44 45              83 84                   -
 # 10 -----------------------                    ----------------------
 # -                        -                    -                    -
 # -       Region 1         -      Region 2      -      Region 3      -

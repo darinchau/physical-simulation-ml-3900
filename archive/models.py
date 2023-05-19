@@ -142,7 +142,7 @@ class PoissonModel(NeuralNetModel):
         net = self.neural_net().to(device).double()
         optimizer = optim.LBFGS(net.parameters(), lr=0.01)
         criterion1 = nn.MSELoss()
-        criterion2 = PoissonLoss()
+        criterion2 = PoissonMSE()
 
         history = History()
         self._logs = []
