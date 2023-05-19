@@ -5,8 +5,10 @@ import torch
 from torch import nn, Tensor
 import pickle
 from typing import Optional, Self
-
-from torch.nn.modules.module import Module
+from load import get_device
+import matplotlib.pyplot as plt
+from tqdm import trange
+import time
 
 # Overload nn module for a high-level api for myself
 class Model(nn.Module):
@@ -145,6 +147,163 @@ class Model(nn.Module):
             self.eval()
         
         return super().__call__(*x)
+    
+class Trainer(Model):
+    """A special type of model designed to train other models. This provides the `self.history` attribute in which one can log the losses"""
+    @property
+    def history(self):
+        if not hasattr(self, '_history'):
+            self._history = History()
+        return self._history
+    
+    @property
+    def training(self):
+        if not hasattr(self, '_training'):
+            self._training = False
+        return self._training
+    
+    def update(self):
+        self.history.update()
+
+    def train(self):
+        self._training = True
+
+    def test(self):
+        self._training = False
+
+    def __call__(self, x, y) -> Tensor:        
+        er = super().__call__(x, y)
+
+        try:
+            if er.shape != ():
+                raise RuntimeError(f"Trainer must return a single pytorch scalar. Found tensor of shape {er.shape} instead")
+        except AttributeError:
+            raise RuntimeError(f"Trainer must return a single pytorch scalar. Found {type(er).__name__} instead")
+        
+        return er
+    
+    def add_loss(self, name: str, loss: float):
+        if self.training:
+            name = 'Train ' + name
+        else:
+            name = 'Test ' + name
+
+        self.history.add_loss(name, loss)
+
+    def log(self, s: str):
+        self.history.logs.append(s)
+    
+class History:
+    """A helper class to plot the history of training"""
+    def __init__(self):
+        self.losses: list[dict[str, float]] = [{}]
+        self.counts = {}
+        self.names: set[str] = set()
+        self.logs: list[str] = []
+
+    def add_loss(self, name, loss):
+        self.names.add(name)
+        
+        if name in self.counts:
+            n = self.counts[name]
+            self.losses[-1][name] = (n * self.losses[-1][name] + loss) / (n + 1)
+            self.counts[name] += 1
+        else:
+            self.losses[-1][name] = loss
+            self.counts[name] = 1
+
+    def update(self):
+        self.losses.append({})
+        self.counts = {}
+
+    def plot(self, root: str, name: str):
+        fig, ax = plt.subplots()
+        for name in self.names:
+            x, y = [], [], [], []
+            for i, losses in enumerate(self.losses):
+                if name in losses:
+                    x.append(i)
+                    y.append(losses[name])
+            ax.plot(x, y, label = name)
+
+        ax.set_yscale('log')
+        ax.legend()
+        ax.set_title(f"Train/Test Error plot")
+        fig.savefig(f"{root}/{name} training loss.jpg")
+
+    def __iter__(self):
+        for i, losses in enumerate(self.losses):
+            s = f"On epoch {i}: "
+            s += ", ".join([f"{k} = {v:.6f}"for k, v in losses.items()])
+            yield s
+        
+        yield "\n"
+        for s in self.logs:
+            yield s
+
+def fit(
+        model: Trainer, 
+        xtrain: Tensor, 
+        ytrain: Tensor, 
+        xtest: Tensor, 
+        ytest: Tensor, 
+        optim: torch.optim.Optimizer = None, 
+        device: torch.device | str = None,
+        epochs: int = 100
+    ) -> Trainer:
+    """Provides us with the sklearn like interface which abstracts away the training loop. However, a dedicated trained has to be created. 
+    Default optimizer is Adam with lr = 0.005
+    Default device is whatever is available on your PC
+    Default epochs is 100
+    Batch size is not available because we dont need it
+    
+    Returns the trained trainer"""
+    if optim is None:
+        optim = torch.optim.Adam(model.parameters(), lr = 0.005)
+
+    if device is None:
+        device = get_device()
+
+    net = model.to(device).double()
+    xtrain = xtrain.to(device).double()
+    xtest = xtest.to(device).double()
+    ytrain = ytrain.to(device).double()
+    ytest = ytest.to(device).double()
+
+    # Show a lovely progress bar
+
+    epochs_pbar = trange(100)
+
+    for epoch in epochs_pbar:
+        net.train()
+        trainloss = 0.
+        for x, y in zip(xtrain, ytrain):
+            def closure():
+                if torch.is_grad_enabled():
+                    optim.zero_grad()
+
+                loss = net(x, y)
+
+                if loss.requires_grad:
+                    loss.backward()
+
+                nonlocal trainloss
+                trainloss += loss.item()
+                
+                return loss
+            optim.step(closure)
+        
+        net.test()
+        testloss = 0.
+        with torch.no_grad():
+            for (x, y) in zip(xtest, ytest):
+                loss = net(x, y)
+                testloss += loss.item()
+
+        log = f"On epoch {epoch}, train loss = {float(trainloss/len(xtrain)):.7f}, test loss = {float(testloss/len(xtest)):.7f}"
+        epochs_pbar.set_description(log)
+
+    return net
 
 class ModelBase(Model):
     """Models base objects are layers directly inherited from pytorch. Serialize gives state dict and there are no module children for us to loop over"""

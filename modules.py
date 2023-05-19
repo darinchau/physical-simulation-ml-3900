@@ -155,7 +155,7 @@ class TrainedLinear(ModelBase):
         # algorithms
         self.model = straight_line_model(algorithm)
     
-    def fit(self, x: Tensor, y: Tensor):
+    def train(self, x: Tensor, y: Tensor):
         num_features = x.shape[1]
         num_tasks = y.shape[1]
         if num_features != self.coefs.shape[0]:
@@ -181,4 +181,3 @@ class TrainedLinear(ModelBase):
             raise ValueError("Trained linear layer has not been trained.")
         x = x @ self.coefs + self.intercept
         return x
-
