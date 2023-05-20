@@ -14,7 +14,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # The folder that contains the generated data
-FOLDER_NAME = "./Datas/Week 7"
+FOLDER_NAME = "./Datas/Week 8"
 
 # The list of training results to include in the error plots
 # We will still make all the animations regardless of this list

@@ -138,7 +138,7 @@ class StochasticNode(Model):
 
 class LSTM(ModelBase):
     def __init__(self, input_dims, hidden_dims, output_dims, *, layers = 2):
-        self.lstm = nn.LSTM(input_size=input_dims, hidden_size=hidden_dims, num_layers = layers)
+        self.lstm = nn.LSTM(input_size=input_dims, hidden_size = hidden_dims, num_layers = layers)
         self.linear = nn.Linear(hidden_dims, output_dims)
 
     def forward(self, x: Tensor):

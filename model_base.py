@@ -4,12 +4,22 @@ from __future__ import annotations
 import torch
 from torch import nn, Tensor
 import pickle
-from typing import Optional, Self
+from typing import Any, Optional, Self
 from load import get_device
 import matplotlib.pyplot as plt
 from tqdm import trange
 import time
 from abc import ABC, abstractmethod as virtual
+import ast
+
+def get(self, attr_name):
+    try:
+        return self.__dict__[attr_name]
+    except KeyError:
+        try:
+            return self.__getattr__(attr_name)
+        except AttributeError:
+            return None
 
 class Model(ABC):
     """Abstract class for all models/model layers etc"""
@@ -18,8 +28,10 @@ class Model(ABC):
         # Calls super init here so that no one forgets
         super().__init__(self)
 
-        self._init_args = args
-        self._init_kwargs = kwargs
+        # Save the init args and kwargs
+        # self._init_args = args
+        # self._init_kwargs = kwargs
+        self._extra_members = {}
 
         # One of the points of doing this is to not call super().__init__() every time when we define our own module
         # So interrupt stuff here
@@ -43,48 +55,62 @@ class Model(ABC):
         """Creates a new model that can be combined with other models to form bigger models. :)"""
         pass
     
-    # A recursive save
-    def _serialize(self) -> dict:
-        state = {}
-        for objname, obj in self._model_children():
-            state[objname] = obj._serialize()
-        state["_=freezed"] = self._freezed
-        return state
-    
-    def _deserialize(self, state: dict):
-        for k, v in state.items():
-            if "_=" in k:
-                continue
-            self.__getattr__(k)._deserialize(v)
-        if state["_=freezed"]:
-            self.freeze()
-        return self
-    
     def _model_children(self):
         """Return a generator of (object name, all children model). This is not recursive"""
         for objname in dir(self):
-            try:
-                obj = self.__getattr__(objname)
-            except AttributeError:
+
+            obj = get(self, objname)
+
+            if obj is None:
                 continue
+
             if isinstance(obj, Model):
                 yield objname, obj
 
+    def __setattr__(self, __name: str, __value: Any) -> None:
+        # avoid recursion
+        if __name != "_extra_members":
+            self._extra_members[__name] = __value
+        return super().__setattr__(__name, __value)
+
+    def _pickel(self):
+        state = {}
+        for objname, obj in self._model_children():
+            state[objname] = (obj.__class__, obj._pickel())
+
+        # Serialize all other members
+        state["_=members"] = self._extra_members
+        return state
+    
+    def _unpickel(self, state: dict[str, tuple[type, dict]]):
+        for k, v in state["_=members"].items():
+            self.__setattr__(k, v)
+        
+        for k, v in state.items():
+            if k.count("_="):
+                continue
+            cls, child_state = v[0], v[1]
+            child_obj = cls.__new__(cls)
+            child_obj._unpickel(child_state)
+            self.__setattr__(k, child_obj)
+        return self
+
     # Defines a way to save the model
     def save(self, path: str):
-        """Save the model file. We suggest to use the '.hlpt' extension for high-level pytorch"""
-        state = self._serialize()
-        state["_init_=args"] = self._init_args
-        state["_init_=kwargs"] = self._init_kwargs
+        """Save the model file. We suggest to use the `.hlpt` extension for high-level pytorch"""
+        state = self._pickel()
         with open(path, 'wb') as f:
             pickle.dump(state, f)
 
     @classmethod
     def load(cls, path: str) -> Self:
+        """Loads the model"""
         with open(path, 'rb') as f:
             state = pickle.load(f)
-        self = cls(*state["_init_=args"], **state["_init_=kwargs"])
-        self._deserialize(state)
+        self = cls.__new__(cls)
+        self._unpickel(state)
+        if not isinstance(self, cls):
+            raise TypeError("Unpickled model has a different type than the type specified.")
         return self
     
     def _class_name(self) -> str:
@@ -148,6 +174,76 @@ class Model(ABC):
         
         return self.forward(*x)
     
+class ModelBase(Model):
+    """Models base objects are layers directly from pytorch. Serialize gives state dict and there are no module children for us to loop over"""
+    @property
+    def model(self) -> nn.Module:
+        """Returns (a reference to) the model. Defaults to looping over the directory and finding the one and only one model. If there is more than one model, this raises a TypeError"""
+        # Try to find nn modules as data member
+        if not hasattr(self, "_model"):
+            for objname in dir(self):
+                obj = get(self, objname)
+
+                if obj is None:
+                    continue
+
+                # We do not allow models as members because this causes issues in saving
+                if isinstance(obj, Model):
+                    raise TypeError("Object must not have Models as data members")
+                
+                # If we found a module, set it to _model. If something has already been set, raise an error
+                if isinstance(obj, nn.Module):
+                    if hasattr(self, "_model"):
+                        raise TypeError("There are more than one nn module defined here")
+                    self._model = obj, objname
+            
+            # If we cannot find a single nn module as data member
+            if not hasattr(self, "_model"):
+                raise TypeError("Model base has no nn module as data member")
+        
+        if not isinstance(self._model[0], nn.Module):
+            raise TypeError(f"self._model must be a pytorch module. Found type: {type(self._model[0]).__name__}")
+        
+        return self._model[0]
+    
+    def _pickel(self):
+        # First get name to the model reference
+        # implicitly call the model method to create the self._model attribute
+        _ = self.model
+        model, name = self._model
+        state = {
+            "model": model,
+            "name": name,
+            "state_dict": self.model.state_dict(),
+            "_=freezed": self._freezed
+        }
+        return state
+    
+    def _unpickel(self, state):
+        model, name = state["model"], state["name"]
+        self.__setattr__(name, model)
+        self.model.load_state_dict(state["state_dict"])
+        if state["_=freezed"]:
+            self.freeze()
+
+    def freeze(self):
+        self._freezed = True
+        for x in self.model.parameters():
+            x.requires_grad = False
+
+    def _num_trainable(self) -> int:
+        return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+    
+    def _num_nontrainable(self) -> int:
+        return sum(p.numel() for p in self.model.parameters() if not p.requires_grad)
+
+    def _get_model_info(self, layers: int):
+        s = "- " * layers + f"{self._class_name()} (Trainable: {self._num_trainable()}, Other: {self._num_nontrainable()})"
+        return s
+    
+    def _model_children(self):
+        raise NotImplementedError("Model children is not recursive in nature. One must implement all base cases if one inherits from model base")
+
 class Trainer(Model):
     """A special type of model designed to train other models. This provides the `self.history` attribute in which one can log the losses"""
     @property
@@ -272,7 +368,7 @@ def fit(
 
     # Show a lovely progress bar
 
-    epochs_pbar = trange(100)
+    epochs_pbar = trange(epochs)
 
     for epoch in epochs_pbar:
         net.train()
@@ -305,48 +401,6 @@ def fit(
 
     return net
 
-class ModelBase(Model):
-    """Models base objects are layers directly from pytorch. One must define the model that it is trying to inherit. Serialize gives state dict and there are no module children for us to loop over"""
-    @property
-    @virtual
-    def model(self) -> nn.Module:
-        """Returns (a reference to) the model"""
-        raise NotImplementedError
-    
-    def _serialize(self) -> dict:
-        return {
-            "state_dict": self.model.state_dict(),
-            "_=freezed": self._freezed
-        }
-    
-    def _deserialize(self, state: dict):
-        self.model.load_state_dict(state["state_dict"])
-        if state["_=freezed"]:
-            self.freeze()
-
-    def freeze(self):
-        self._freezed = True
-        for x in self.model.parameters():
-            x.requires_grad = False
-
-    def _num_trainable(self) -> int:
-        return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
-    
-    def _num_nontrainable(self) -> int:
-        return sum(p.numel() for p in self.model.parameters() if not p.requires_grad)
-
-    def _get_model_info(self, layers: int):
-        s = "- " * layers + f"{self._class_name()} (Trainable: {self._num_trainable()}, Other: {self._num_nontrainable()})"
-        return s
-    
-    def _model_children(self):
-        raise NotImplementedError("Model children is not recursive in nature. One must implement all base cases if one inherits from model base")
-    
-    def forward(self, x: Tensor) -> Tensor:
-        m = self.model
-        x = m(x)
-        return x
-
 ##### Tests #####
 import os
 import random
@@ -355,9 +409,9 @@ class LinearTestModel(ModelBase):
     def __init__(self, ins, outs):
         self.fc = nn.Linear(ins, outs)
 
-    @property
-    def model(self) -> nn.Module:
-        return self.fc
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.fc(x)
+        return x
     
 class LinearTestModel2(Model):
     def __init__(self, linear):
@@ -368,11 +422,12 @@ class LinearTestModel2(Model):
         return x
 
 class LinearTestModel3(Model):
-    def __init__(self, a, b):
+    def __init__(self, a, b, c = 5):
         self.a = a
         self.b = b
+        self.c = c
 
-    def forward(self, *x: Tensor) -> Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         x = self.a(x)
         return x
     
@@ -392,7 +447,6 @@ def test():
     c = a2(t)
     assert c.shape == (178, 200)
     assert torch.all(b == c)
-    os.remove(path)
 
     print("Test 2 passed")
     
@@ -408,7 +462,6 @@ def test():
     c = a4(t)
     assert c.shape == (178, 200)
     assert torch.all(b == c)
-    os.remove(path)
 
     print("Test 4 passed")
 
@@ -416,11 +469,10 @@ def test():
     a4.save(path)
     a5 = LinearTestModel2.load(path)
     assert a5.fc._freezed
-    os.remove(path)
 
     print("Test 5 passed")
 
-    a6 = LinearTestModel3(a, a3)
+    a6 = LinearTestModel3(a, a3, c = 6)
     c = a6(t)
     assert c.shape == (178, 200)
     assert torch.all(b == c)
@@ -431,7 +483,32 @@ def test():
     assert c.shape == (178, 200)
     assert torch.all(b == c)
 
+    assert a7.c == 6
+
     print("Test 6 passed")
+
+    class LinearTestModel4(Model):
+        def __init__(self, linear):
+            self.fc = linear
+
+        def forward(self, x: Tensor) -> Tensor:
+            x = self.fc(x)
+            return x
+
+    a8 = LinearTestModel4(a)
+    c = a8(t)
+    assert c.shape == (178, 200)
+    assert torch.all(b == c)
+
+    a8.save(path)
+    a9 = LinearTestModel4.load(path)
+    c = a9(t)
+    assert c.shape == (178, 200)
+    assert torch.all(b == c)
+
+    print("Test 7 passed")
+
+    os.remove(path)
 
 if __name__ == "__main__":
     test()
