@@ -57,12 +57,16 @@ class Model(ABC):
     
     def _model_children(self):
         """Return a generator of (object name, all children model). This is not recursive"""
+        _warned = False
         for objname in dir(self):
-
             obj = get(self, objname)
 
             if obj is None:
                 continue
+
+            if isinstance(obj, nn.Module) and not _warned:
+                print(f"Found an nn.Module inside a model (type: {self._class_name()}). While this is alright, saving and loading this model cannot retreive the state of this module. Use a ModelBase to wrap this nn.Module instead.")
+                _warned = True
 
             if isinstance(obj, Model):
                 yield objname, obj
@@ -189,17 +193,17 @@ class ModelBase(Model):
 
                 # We do not allow models as members because this causes issues in saving
                 if isinstance(obj, Model):
-                    raise TypeError("Object must not have Models as data members")
+                    raise TypeError(f"Object (type: {self._class_name()}) must not have Models as data members")
                 
                 # If we found a module, set it to _model. If something has already been set, raise an error
                 if isinstance(obj, nn.Module):
                     if hasattr(self, "_model"):
-                        raise TypeError("There are more than one nn module defined here")
+                        raise TypeError(f"There are more than one nn module defined here at (type: {self._class_name()})")
                     self._model = obj, objname
             
             # If we cannot find a single nn module as data member
             if not hasattr(self, "_model"):
-                raise TypeError("Model base has no nn module as data member")
+                raise TypeError(f"Model (type: {self._class_name()}) base has no nn module as data member")
         
         if not isinstance(self._model[0], nn.Module):
             raise TypeError(f"self._model must be a pytorch module. Found type: {type(self._model[0]).__name__}")
@@ -242,7 +246,7 @@ class ModelBase(Model):
         return s
     
     def _model_children(self):
-        raise NotImplementedError("Model children is not recursive in nature. One must implement all base cases if one inherits from model base")
+        raise NotImplementedError(f"Model (type: {self._class_name()}) children is not recursive in nature. One must implement all base cases if one inherits from model base")
 
 class Trainer(Model):
     """A special type of model designed to train other models. This provides the `self.history` attribute in which one can log the losses"""

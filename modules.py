@@ -44,7 +44,7 @@ class Linear(ModelBase):
         x = self.fc(x)
         return x
 
-class PoissonMSE(ModelBase):
+class PoissonMSE(Model):
     """Gives the poisson equation - the value of ||∇²φ - (-q)S||
     where S is the space charge described in p265 of the PDF 
     https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
@@ -72,15 +72,15 @@ class NormalizedPoissonRMSE(PoissonMSE):
     def forward(self, x, space_charge):
         return torch.sqrt(normalized_poisson_mse_(x, space_charge, self.x, self.y))
     
-class MSELoss(ModelBase):
+class MSELoss(Model):
     def forward(self, ypred, y) -> Tensor:
         return torch.mean((ypred - y) ** 2)
     
-class ReLU(ModelBase):
+class ReLU(Model):
     def forward(self, x: Tensor) -> Tensor:
         return torch.relu(x)
     
-class Sigmoid(ModelBase):
+class Sigmoid(Model):
     def forward(self, x: Tensor) -> Tensor:
         return torch.sigmoid(x)
 
@@ -92,28 +92,33 @@ class LeakySigmoid(ModelBase):
         leakage = self.leak(x)
         return leakage * x + torch.sigmoid(x)
     
+class Tanh(Model):
+    def forward(self, x: Tensor) -> Tensor:
+        return torch.tanh(x)
+    
 # Does nothing but to make code more readable
-class Identity(ModelBase):
+class Identity(Model):
     def forward(self, x):
         return x
     
 class StochasticNode(Model):
     """Stochastic node for VAE. The output is inherently random. Specify the device if needed"""
     def __init__(self, in_size, out_size, *, device = None):
-        super().__init__()
+        if device is None:
+            self.device = get_device()
+        else:
+            self.device = device
 
         # Use tanh for mu to constrain it around 0
-        self.lmu = nn.Linear(in_size, out_size)
-        self.smu = nn.Tanh()
+        self.lmu = Linear(in_size, out_size)
+        self.smu = Tanh()
 
         # Use sigmoid for sigma to constrain it to positive values and around 1
-        self.lsi = nn.Linear(in_size, out_size)
-        self.ssi = nn.Sigmoid()
+        self.lsi = Linear(in_size, out_size)
+        self.ssi = Sigmoid()
 
         # Move device to cuda if possible
-        if device is None:
-            device = get_device()
-        self.N = torch.distributions.Normal(torch.tensor(0).float().to(device), torch.tensor(1).float().to(device))
+        self.N = torch.distributions.Normal(torch.tensor(0).float().to(self.device), torch.tensor(1).float().to(self.device))
         self.kl = torch.tensor(0)
 
     def forward(self, x):
@@ -135,8 +140,13 @@ class StochasticNode(Model):
         self.kl = -.5 * (torch.log(var) - var - mean * mean + 1).sum()
 
         return z
+    
+    # The inner implementation details for stochastic node is not required anyway
+    def _get_model_info(self, layers: int):
+        s = "- " * layers + f"{self._class_name()} (Trainable: {self._num_trainable()}, Other: {self._num_nontrainable()})"
+        return s
 
-class LSTM(ModelBase):
+class LSTM(Model):
     def __init__(self, input_dims, hidden_dims, output_dims, *, layers = 2):
         self.lstm = nn.LSTM(input_size=input_dims, hidden_size = hidden_dims, num_layers = layers)
         self.linear = nn.Linear(hidden_dims, output_dims)
@@ -147,8 +157,12 @@ class LSTM(ModelBase):
         out, _ = self.lstm(x)
         out = self.linear(out.view(len(x), -1))
         return out
+    
+    def _get_model_info(self, layers: int):
+        s = "- " * layers + f"{self._class_name()} (Trainable: {self._num_trainable()}, Other: {self._num_nontrainable()})"
+        return s
 
-class TrainedLinear(ModelBase):
+class TrainedLinear(Model):
     def __init__(self, in_size, out_size, algorithm = 'TheilSen'):
         self._trained = False
         self.coefs = nn.Parameter(torch.zeros(in_size, out_size), requires_grad=False)
@@ -183,6 +197,9 @@ class TrainedLinear(ModelBase):
             raise ValueError("Trained linear layer has not been trained.")
         x = x @ self.coefs + self.intercept
         return x
+    
+    def _num_nontrainable(self) -> int:
+        return self.intercept.numel() + self.coefs.numel()
 
 # This model does not need to be trained
 class PoissonJITRegressor(Model):
