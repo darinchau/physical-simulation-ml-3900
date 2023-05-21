@@ -125,20 +125,41 @@ class TrainingIndex(tuple):
 
     def include(self):
         return list(range(self.start, self.stop))
+    
+# For easy access of training indices
+class TrainingIndexContainer:
+    def __init__(self, ls) -> None:
+        self.ls = ls
 
-TRAINING_IDXS = [
-    TrainingIndex("First 5", 0, 5),
-    TrainingIndex("First 20", 0, 20),
-    TrainingIndex("First 30", 0, 30),
-    TrainingIndex("First 40", 0, 40),
-    TrainingIndex("First 60", 0, 60),
-    TrainingIndex("First 75", 0, 75),
-    TrainingIndex("First 90", 0, 90),
-    TrainingIndex("15 to 45", 15, 45),
-    TrainingIndex("20 to 40", 20, 40),
-    TrainingIndex("40 to 60", 40, 60),
-    TrainingIndex("25 to 35", 25, 35),
-    TrainingIndex("20 to 50", 20, 50),
-    TrainingIndex("30 to 50", 30, 50),
-    TrainingIndex("29 and 30 and 31", 29, 32)
-]
+    def __iter__(self):
+        return iter(self.ls)
+    
+    def __getitem__(self, a):
+        if isinstance(a, int):
+            return self.ls[a]
+        
+        if isinstance(a, str):
+            if a.startswith("First "):
+                return TrainingIndex(a, 0, int(a.split("First ")[1]))
+            if a.count("to"):
+                return TrainingIndex(a, int(a.split("to")[0]), int(a.split("to")[1]))
+            
+        raise TypeError
+
+
+TRAINING_IDXS = TrainingIndexContainer([
+            TrainingIndex("First 5", 0, 5),
+            TrainingIndex("First 20", 0, 20),
+            TrainingIndex("First 30", 0, 30),
+            TrainingIndex("First 40", 0, 40),
+            TrainingIndex("First 60", 0, 60),
+            TrainingIndex("First 75", 0, 75),
+            TrainingIndex("First 90", 0, 90),
+            TrainingIndex("15 to 45", 15, 45),
+            TrainingIndex("20 to 40", 20, 40),
+            TrainingIndex("40 to 60", 40, 60),
+            TrainingIndex("25 to 35", 25, 35),
+            TrainingIndex("20 to 50", 20, 50),
+            TrainingIndex("30 to 50", 30, 50),
+            TrainingIndex("29 to 32", 29, 32)
+        ])
