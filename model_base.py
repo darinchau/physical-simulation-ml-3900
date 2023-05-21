@@ -23,6 +23,9 @@ def get(self, attr_name):
 
 class Model(ABC):
     """Abstract class for all models/model layers etc"""
+    # If true, then recursively show the model children details in summary
+    _info_show_impl_details = True
+
     def __new__(cls, *args, **kwargs):
         self = super(Model, cls).__new__(cls)
         # Calls super init here so that no one forgets
@@ -73,7 +76,7 @@ class Model(ABC):
 
     def __setattr__(self, __name: str, __value: Any) -> None:
         # avoid recursion
-        if __name != "_extra_members":
+        if __name != "_extra_members" or __name.endswith("_"):
             self._extra_members[__name] = __value
         return super().__setattr__(__name, __value)
 
@@ -149,9 +152,10 @@ class Model(ABC):
     # Recursively get all the model info
     def _get_model_info(self, layers: int):
         s = "- " * layers + f"{self._class_name()} (Trainable: {self._num_trainable()}, Other: {self._num_nontrainable()})"
-        for _, model in self._model_children():
-            s += "\n"
-            s += model._get_model_info(layers + 1)
+        if self._info_show_impl_details:
+            for _, model in self._model_children():
+                s += "\n"
+                s += model._get_model_info(layers + 1)
         return s
     
     def summary(self):
@@ -171,6 +175,11 @@ class Model(ABC):
         for _, p in self._model_children():
             p.freeze()
         return self
+    
+    def eval(self):
+        """Put the model in evaluation mode"""
+        for _, p in self._model_children():
+            p.eval()
 
     def __call__(self, *x):
         if self._freezed:
@@ -180,6 +189,8 @@ class Model(ABC):
     
 class ModelBase(Model):
     """Models base objects are layers directly from pytorch. Serialize gives state dict and there are no module children for us to loop over"""
+    _info_show_impl_details = False
+    
     @property
     def model(self) -> nn.Module:
         """Returns (a reference to) the model. Defaults to looping over the directory and finding the one and only one model. If there is more than one model, this raises a TypeError"""
@@ -235,15 +246,15 @@ class ModelBase(Model):
         for x in self.model.parameters():
             x.requires_grad = False
 
+    def eval(self):
+        """Puts the model in evaluation mode"""
+        self.model.eval()
+
     def _num_trainable(self) -> int:
         return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
     
     def _num_nontrainable(self) -> int:
         return sum(p.numel() for p in self.model.parameters() if not p.requires_grad)
-
-    def _get_model_info(self, layers: int):
-        s = "- " * layers + f"{self._class_name()} (Trainable: {self._num_trainable()}, Other: {self._num_nontrainable()})"
-        return s
     
     def _model_children(self):
         raise NotImplementedError(f"Model (type: {self._class_name()}) children is not recursive in nature. One must implement all base cases if one inherits from model base")
@@ -251,7 +262,7 @@ class ModelBase(Model):
 class Trainer(Model):
     """A special type of model designed to train other models. This provides the `self.history` attribute in which one can log the losses"""
     @property
-    def history(self):
+    def history(self) -> History:
         if not hasattr(self, '_history'):
             self._history = History()
         return self._history
@@ -270,6 +281,10 @@ class Trainer(Model):
 
     def test(self):
         self._training = False
+
+    def forward(self, x: Tensor, y: Tensor) -> Tensor:
+        """Takes in x and y and returns the loss. Keep in mind a `self.history` History object is available"""
+        return super().forward(x, y)
 
     def __call__(self, x, y) -> Tensor:        
         er = super().__call__(x, y)

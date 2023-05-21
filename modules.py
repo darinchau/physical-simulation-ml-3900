@@ -11,6 +11,7 @@ from sklearn.linear_model import TheilSenRegressor, LinearRegression
 from util import straight_line_model
 import numpy as np
 from scipy.optimize import minimize
+import warnings
 
 class Sequential(Model):
     """Sequential model"""
@@ -50,27 +51,29 @@ class PoissonMSE(Model):
     https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
     def __init__(self, device = None):
         if device is None:
-            device = get_device()
+            self._device = get_device()
+        else:
+            self._device = device
         x, y = load_spacing()
-        self.x = x.to(device)
-        self.y = y.to(device)
+        self._x = x.to(device)
+        self._y = y.to(device)
     
     def forward(self, x, space_charge):
-        return poisson_mse_(x, space_charge, self.x, self.y)
+        return poisson_mse_(x, space_charge, self._x, self._y)
 
 class NormalizedPoissonMSE(PoissonMSE):
     """Normalized means we assume space charge has already been multiplied by -q
     Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
     where S is the space charge described in p265 of the PDF+"""    
     def forward(self, x, space_charge):
-        return normalized_poisson_mse_(x, space_charge, self.x, self.y)
+        return normalized_poisson_mse_(x, space_charge, self._x, self._y)
     
 class NormalizedPoissonRMSE(PoissonMSE):
     """Normalized means we assume space charge has already been multiplied by -q
     Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
     where S is the space charge described in p265 of the PDF+"""    
     def forward(self, x, space_charge):
-        return torch.sqrt(normalized_poisson_mse_(x, space_charge, self.x, self.y))
+        return torch.sqrt(normalized_poisson_mse_(x, space_charge, self._x, self._y))
     
 class MSELoss(Model):
     def forward(self, ypred, y) -> Tensor:
@@ -84,13 +87,27 @@ class Sigmoid(Model):
     def forward(self, x: Tensor) -> Tensor:
         return torch.sigmoid(x)
 
-class LeakySigmoid(ModelBase):
-    def __init__(self, in_size):
-        self.leak = nn.Linear(in_size, 1)
+class LeakySigmoid(Model):
+    _info_show_impl_details = False
+
+    def __init__(self):
+        self.inited = False
 
     def forward(self, x):
+        if not self.inited:
+            self.leak = nn.Linear(x.shape[1], 1)
+            self.inited = True
         leakage = self.leak(x)
         return leakage * x + torch.sigmoid(x)
+    
+    def _num_trainable(self) -> int:
+        if self.inited:
+            return sum(p.numel() for p in self.leak.parameters() if p.requires_grad)
+        return 0
+    
+    def eval(self):
+        if self.inited:
+            self.leak.eval()
     
 class Tanh(Model):
     def forward(self, x: Tensor) -> Tensor:
@@ -103,11 +120,11 @@ class Identity(Model):
     
 class StochasticNode(Model):
     """Stochastic node for VAE. The output is inherently random. Specify the device if needed"""
+    _info_show_impl_details = False
+
     def __init__(self, in_size, out_size, *, device = None):
         if device is None:
-            self.device = get_device()
-        else:
-            self.device = device
+            device = get_device()
 
         # Use tanh for mu to constrain it around 0
         self.lmu = Linear(in_size, out_size)
@@ -118,8 +135,10 @@ class StochasticNode(Model):
         self.ssi = Sigmoid()
 
         # Move device to cuda if possible
-        self.N = torch.distributions.Normal(torch.tensor(0).float().to(self.device), torch.tensor(1).float().to(self.device))
-        self.kl = torch.tensor(0)
+        self._N = torch.distributions.Normal(torch.tensor(0).float().to(device), torch.tensor(1).float().to(device))
+        self._kl = torch.tensor(0)
+
+        self.eval_ = False
 
     def forward(self, x):
         mean = self.lmu(x)
@@ -129,40 +148,72 @@ class StochasticNode(Model):
         var = self.lsi(x)
         var = 2 * self.ssi(var)
 
+        # In evaluation mode, return the mean directly
+        if self.eval_:
+            return mean
+
         # z = mu + sigma * N(0, 1)
-        z = mean + var * self.N.sample(mean.shape)
+        z = mean + var * self._N.sample(mean.shape)
 
         # KL divergence
         # https://stats.stackexchange.com/questions/318184/kl-loss-with-a-unit-gaussian?noredirect=1&lq=1
         # https://stats.stackexchange.com/questions/335197/why-kl-divergence-is-non-negative
         # https://kvfrans.com/variational-autoencoders-explained/
         # https://stats.stackexchange.com/questions/318748/deriving-the-kl-divergence-loss-for-vaes/370048#370048
-        self.kl = -.5 * (torch.log(var) - var - mean * mean + 1).sum()
+        self._kl = -.5 * (torch.log(var) - var - mean * mean + 1).sum()
 
         return z
     
-    # The inner implementation details for stochastic node is not required anyway
-    def _get_model_info(self, layers: int):
-        s = "- " * layers + f"{self._class_name()} (Trainable: {self._num_trainable()}, Other: {self._num_nontrainable()})"
-        return s
+    def eval(self):
+        self.eval_ = True
+        self.lmu.eval()
+        self.smu.eval()
 
 class LSTM(Model):
+    """An lstm node."""
+    _info_show_impl_details = False
+
     def __init__(self, input_dims, hidden_dims, output_dims, *, layers = 2):
+        self.out_layers = output_dims
         self.lstm = nn.LSTM(input_size=input_dims, hidden_size = hidden_dims, num_layers = layers)
         self.linear = nn.Linear(hidden_dims, output_dims)
 
     def forward(self, x: Tensor):
-        # Input is (N, features) so use strides to make it good first
-        # Pretend everything is one giant sequence - one batch, 101 sequences
         out, _ = self.lstm(x)
         out = self.linear(out.view(len(x), -1))
         return out
     
+    def __call__(self, x):
+        """Input is 
+            (N, n_features) - we will pretend the whole thing is one giant sequence, or 
+            (N, n terms in sequence, n_features): the sequences are separated :)
+            
+        Output is:
+            (N, n_features_out) or (N, n terms in sequence, n_out_features) respectively"""
+        if len(x.shape) == 3:
+            results = torch.zeros(x.shape[0], x.shape[1], self.out_layers)
+            for i in range(x.shape[0]):
+                results[i] = super().__call__(x[i])
+            return results
+        return super().__call__(x)
+    
     def _get_model_info(self, layers: int):
         s = "- " * layers + f"{self._class_name()} (Trainable: {self._num_trainable()}, Other: {self._num_nontrainable()})"
         return s
+    
+    def _num_trainable(self):
+        return sum(p.numel() for p in self.lstm.parameters() if p.requires_grad) + sum(p.numel() for p in self.linear.parameters() if p.requires_grad)
+    
+    def _num_nontrainable(self):
+        return sum(p.numel() for p in self.lstm.parameters() if not p.requires_grad) + sum(p.numel() for p in self.linear.parameters() if not p.requires_grad)
+    
+    def eval(self):
+        self.lstm.eval()
+        self.linear.eval()
 
 class TrainedLinear(Model):
+    """A linear node except the weights and biases are pretrained separately"""
+    _info_show_impl_details = False
     def __init__(self, in_size, out_size, algorithm = 'TheilSen'):
         self._trained = False
         self.coefs = nn.Parameter(torch.zeros(in_size, out_size), requires_grad=False)
@@ -200,6 +251,9 @@ class TrainedLinear(Model):
     
     def _num_nontrainable(self) -> int:
         return self.intercept.numel() + self.coefs.numel()
+    
+    def eval(self):
+        pass
 
 # This model does not need to be trained
 class PoissonJITRegressor(Model):
@@ -265,5 +319,110 @@ class PoissonJITRegressor(Model):
 
                 # poi = poisson_loss(new_ep, new_sc)
                 # print(f" Poisson loss: {poi}")
-
         return result
+    
+class LSTMStack(Model):
+    """Reshapes the model before feeding into an LSTM or cached linear (etc.) model. The inner implementation is just a reshape inside a try-catch block"""
+    def __init__(self, stack_size: int):
+        self._stack_size = stack_size
+
+    def forward(self, x: Tensor) -> Tensor:
+        try:
+            return x.reshape(-1, self._stack_size, x.shape[1])
+        except RuntimeError as e:
+            if e.args[0].startswith("shape"):
+                raise ValueError(f"The resize stack size {self._stack_size} is invalid for {x.shape[0]} datas")
+    
+class Flatten(Model):
+    """Reshapes the tensor back to (N, n_features)"""
+    def forward(self, x: Tensor) -> Tensor:
+        return x.reshape(1, -1)
+
+class CachedLinear(ModelBase):
+    """Caches the previous output and uses it for the next prediction. The only difference with an LSTM is we save the prediction state instead of a separate hidden state
+    This has the advantage of forcing the model to remember only the last N results."""
+    _info_show_impl_details = False
+    def __init__(self, in_size, out_size, N, / , device = None):
+        self.N = N
+        if device is None:
+            self._device = get_device()
+        else:
+            self._device = device
+        self.inited = False
+        self.in_size = in_size
+        self.out_size = out_size
+        self.linear = Linear(self.in_size + self.N * self.out_size, self.out_size)
+    
+    def forward(self, x: Tensor) -> Tensor:
+        # Input shape here is always (n terms in sequence, n_features)
+        cached_state_ = torch.zeros((self.N, self.out_size)).to(self._device).double()
+        
+        results = torch.zeros((x.shape[0], self.out_size))
+
+        for i in range(x.shape[0]):
+            # Predict and then cache the output state
+            x_ = torch.concat([x[i], results.reshape(-1)])
+            y = self.linear(x_)
+            cached_state_[1:] = cached_state_[:-1]
+            cached_state_[0] = y
+            results[i] = y
+
+        return results
+
+    def __call__(self, x):
+        """Input is 
+            (N, n_features) - we will pretend the whole thing is one giant sequence, or 
+            (N, n terms in sequence, n_features): the sequences are separated :)
+            
+        Output is:
+            (N, n_features_out) or (N, n terms in sequence, n_out_features) respectively"""
+        if len(x.shape) == 3:
+            results = torch.zeros(x.shape[0], x.shape[1], self.out_layers)
+            for i in range(x.shape[0]):
+                results[i] = super().__call__(x[i])
+            return results
+        return super().__call__(x)
+
+class PrincipalComponentExtractor(Model):
+    """Takes the tensor x, and returns the principal N dimensions by calculating its covariance matrix. N indicates the number of principal components to extract
+    Useful methods are:
+    - `model.fit(X)`: where X is a (n_data, n_features). This computes the projection data for PCA. Returns None. If you really need to access the projection data, it is at `model.pdata` and it should be a tensor with shape (N, n_features). The sorted eigenvalues is at `model.eigenvalues` and the sorted eigenvectors are at `model.eigenvectors`
+    - `model.project(X)`: where X is a (n_data, n_features) tensor. This performs the projection for you and returns an (n_data, N) tensor. Raises a runtime error if n_features does not match
+    - `model.forward(X)`: fit followed by project."""
+    def __init__(self, N: int, /, device = None):
+        self.N = N
+        self.eigenvectors = None
+
+        if device is None:
+            self._device = get_device()
+        else:
+            self._device = device
+
+    def fit(self, X: Tensor):
+        cov = torch.cov(X.T.float())
+        l, v = torch.linalg.eig(cov)
+
+        # Temporarily supress warnings. This normally screams at us for discarding the complex part. But X.T @ X is always positive definite so real eigenvalues :)
+        warnings.filterwarnings("ignore", category=UserWarning) 
+        sorted_eigen = l.float().argsort(descending=True)
+        self.eigenvalues = l.double().sort(descending=True)
+        self.eigenvectors = v[:, sorted_eigen].double()
+        warnings.filterwarnings("default", category=UserWarning)
+
+    def project(self, X: Tensor) -> Tensor:
+        if self.eigenvectors is None:
+            raise RuntimeError("Projection data has not been calculated yet. Please first call model.fit()")
+        
+        P = self.eigenvectors[:, :self.N]
+        
+        if X.shape[1] != P.shape[0]:
+            raise RuntimeError(f"Expects {P.shape[0]}-dimensional data due to training. Got {X.shape[1]}-d data instead.")
+        
+        # Welcome to transpose hell
+        X_ = X - torch.mean(X.float(), dim = 0)
+        components = P.T @ X_.T.double()
+        return components.T
+    
+    def forward(self, X: Tensor) -> Tensor:
+        self.fit(X)
+        return self.project(X)
