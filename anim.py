@@ -12,6 +12,8 @@ from numpy.typing import NDArray
 from sklearn.linear_model import TheilSenRegressor
 import util
 from typing import Callable
+from tqdm import tqdm
+from multiprocessing import Pool
 
 # A class wrapper to help us plot data. We assume all error checking has been done
 class AnimationMaker:
@@ -431,7 +433,6 @@ def log_diff(x, y):
     err_log_10[error < 1e-20] = -20
     return err_log_10, -20
 
-
 def heatmat_fn_plot(f: Callable[[float, float], float], xrange: tuple[int, int] = (-5, 5), yrange: tuple[int, int] = (-5, 5), resolution = 100):
     """Plot the function as a heatmap.
     - `xrange/yrange`: specify the x and y range of the plot
@@ -446,19 +447,16 @@ def heatmat_fn_plot(f: Callable[[float, float], float], xrange: tuple[int, int] 
 
     # Calculate the corresponding Z values using the function f
     args = [(x_val, y_val) for x_val in x for y_val in y]
-
-    # if multiprocess:
-    #     from p_tqdm import p_umap
-    #     def f_(a):
-    #         x, y = a
-    #         return x, y, f(x, y)
-    #     results = p_umap(f_, args, num_cpus = multiprocess)
-    # else:
-    from tqdm import tqdm
     results = [(a[0], a[1], f(a[0], a[1])) for a in tqdm(args)]
     
+
+    min_x, min_y, min_f = 0, 0, 9999
     for x_val, y_val, r in results:
         Z[np.where(x == x_val), np.where(y == y_val)] = r
+        if r < min_f:
+            min_x, min_y, min_f = x_val, y_val, r
+    
+    print(f"Minimum x: {min_x}, Minimum y: {min_y}, minimum f: {min_f}")
 
     # Create the heatmap plot
     fig, ax = plt.subplots()
@@ -471,4 +469,4 @@ def heatmat_fn_plot(f: Callable[[float, float], float], xrange: tuple[int, int] 
     ax.set_xlabel("x")
     ax.set_ylabel("y")
 
-    return fig, ax
+    return fig, ax, Z
