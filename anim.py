@@ -11,6 +11,7 @@ from derivative import poisson_rmse
 from numpy.typing import NDArray
 from sklearn.linear_model import TheilSenRegressor
 import util
+from typing import Callable
 
 # A class wrapper to help us plot data. We assume all error checking has been done
 class AnimationMaker:
@@ -429,3 +430,45 @@ def log_diff(x, y):
             pass
     err_log_10[error < 1e-20] = -20
     return err_log_10, -20
+
+
+def heatmat_fn_plot(f: Callable[[float, float], float], xrange: tuple[int, int] = (-5, 5), yrange: tuple[int, int] = (-5, 5), resolution = 100):
+    """Plot the function as a heatmap.
+    - `xrange/yrange`: specify the x and y range of the plot
+    - `resolution`: specify the number of subdivisions in a plot
+    - `multiprocess`: if > 0, then use n processes. Otherwise use one single process"""
+    # Generate x and y values
+    x = np.linspace(xrange[0], xrange[1], resolution)
+    y = np.linspace(yrange[0], yrange[1], resolution)
+
+    # Create empty array for Z values
+    Z = np.empty((len(x), len(y)))
+
+    # Calculate the corresponding Z values using the function f
+    args = [(x_val, y_val) for x_val in x for y_val in y]
+
+    # if multiprocess:
+    #     from p_tqdm import p_umap
+    #     def f_(a):
+    #         x, y = a
+    #         return x, y, f(x, y)
+    #     results = p_umap(f_, args, num_cpus = multiprocess)
+    # else:
+    from tqdm import tqdm
+    results = [(a[0], a[1], f(a[0], a[1])) for a in tqdm(args)]
+    
+    for x_val, y_val, r in results:
+        Z[np.where(x == x_val), np.where(y == y_val)] = r
+
+    # Create the heatmap plot
+    fig, ax = plt.subplots()
+    im = ax.imshow(Z, cmap='hot', extent=[xrange[0], xrange[1], yrange[0], yrange[1]], origin='lower')
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.ax.set_ylabel("F(x, y) value", rotation=-90, va="bottom")
+
+    # Set plot title and labels
+    fig.suptitle("Heatmap Plot of f(x, y)")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+
+    return fig, ax

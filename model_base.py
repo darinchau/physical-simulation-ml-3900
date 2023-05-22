@@ -21,6 +21,20 @@ def get(self, attr_name):
         except AttributeError:
             return None
 
+def _call_fix(f):
+    # This fixes the docs on __call__
+    for doc in (
+        f.__doc__,
+        f.__class__.forward.__doc__,
+        f.__class__.__doc__,
+        Model.forward.__doc__
+    ):
+        if doc is None:
+            continue
+        f.__doc__ = doc
+        return f
+    raise NotImplementedError
+
 class Model(ABC):
     """Abstract class for all models/model layers etc"""
     # If true, then recursively show the model children details in summary
@@ -52,6 +66,7 @@ class Model(ABC):
     
     @virtual
     def forward(self, *x: Tensor) -> Tensor:
+        """Passes the tensor forward"""
         raise NotImplementedError
     
     def __init__(self):

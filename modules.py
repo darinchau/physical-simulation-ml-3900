@@ -64,14 +64,14 @@ class PoissonMSE(Model):
 class NormalizedPoissonMSE(PoissonMSE):
     """Normalized means we assume space charge has already been multiplied by -q
     Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
-    where S is the space charge described in p265 of the PDF+"""    
+    where S is the space charge described in p265 of the PDF"""    
     def forward(self, x, space_charge):
         return normalized_poisson_mse_(x, space_charge, self._x, self._y)
     
 class NormalizedPoissonRMSE(PoissonMSE):
     """Normalized means we assume space charge has already been multiplied by -q
     Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
-    where S is the space charge described in p265 of the PDF+"""    
+    where S is the space charge described in p265 of the PDF"""    
     def forward(self, x, space_charge):
         return torch.sqrt(normalized_poisson_mse_(x, space_charge, self._x, self._y))
     
@@ -437,11 +437,15 @@ class PrincipalComponentExtractor(Model):
 
         X_ = torch.zeros(X.shape[0], self.eigenvalues.shape[0])
         X_[:, :X.shape[1]] = X
+        X_ = X_.double()
         P = self.eigenvectors
         try:
             result = X_ @ torch.linalg.inv(P)
         except RuntimeError as e:
-            raise RuntimeError("PCA eigenvectors matrix is not invertible for some reason. This is probably due to that there are very very very small (coerced to 0) eigenvalues.")
+            # raise RuntimeError(f"PCA eigenvectors matrix is not invertible for some reason. This is probably due to that there are very very very small (coerced to 0) eigenvalues.\n\nOriginal error: \"\"\"\n{e}\n\"\"\"")
+            # Use a psuedoinverse if the inverse is not available
+            # Also A @ B = (B.T @ A.T).T
+            result =  torch.linalg.lstsq(P.T, X_.T).solution.T
         return result
         
     
