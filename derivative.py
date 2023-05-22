@@ -1,9 +1,10 @@
 from __future__ import annotations
 import numpy as np
 import torch
-from load import load_spacing
+from load import load_spacing, get_device
 from numpy.typing import NDArray
 from torch import Tensor, nn
+from model_base import Model
 
 __all__ = (
     "poisson_lhs",
@@ -11,8 +12,11 @@ __all__ = (
     "PoissonLoss"
 )
 
+def boundary_condition_(data, result, eps, x, y):
+    
+
 # Wrapper around albert's function, without the division by -Q
-def laplacian(data, result, eps, x, y):
+def laplacian_(data, result, eps, x, y):
     """Calculate the LHS of poisson equation"""
     xr, yr, epr = x[1:-1].view(-1, 1), y[2:], data[:, 1:-1, 2:]
     xd, yd, epd = x[2:].view(-1, 1), y[1:-1], data[:, 2:, 1:-1]
@@ -58,7 +62,10 @@ def poisson_lhs(data: Tensor | NDArray, x: Tensor | NDArray, y: Tensor | NDArray
     else:
         raise TypeError(f"data (type: {type(data).__name__}) is neither a Tensor or a numpy array")
     
-    return laplacian(data, result, eps, x, y)
+    # Calculate the center
+    result = laplacian_(data, result, eps, x, y)
+
+    # Update the boundary conditions
 
 def normalized_poisson_mse_(data, space_charge, x, y):
     ep = data.reshape(-1, 129, 17)
@@ -84,3 +91,33 @@ def poisson_rmse(data: Tensor | NDArray, space_charge: Tensor | NDArray):
         return torch.sqrt(poisson_mse_(data, space_charge, x, y))
     else:
         return np.sqrt(poisson_mse_(data, space_charge, x, y))
+    
+class PoissonMSE(Model):
+    """Gives the poisson equation - the value of ||∇²φ - (-q)S||
+    where S is the space charge described in p265 of the PDF 
+    https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
+    def __init__(self, device = None):
+        if device is None:
+            self._device = get_device()
+        else:
+            self._device = device
+        x, y = load_spacing()
+        self._x = x.to(device)
+        self._y = y.to(device)
+    
+    def forward(self, x, space_charge):
+        return poisson_mse_(x, space_charge, self._x, self._y)
+
+class NormalizedPoissonMSE(PoissonMSE):
+    """Normalized means we assume space charge has already been multiplied by -q
+    Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
+    where S is the space charge described in p265 of the PDF"""    
+    def forward(self, x, space_charge):
+        return normalized_poisson_mse_(x, space_charge, self._x, self._y)
+    
+class NormalizedPoissonRMSE(PoissonMSE):
+    """Normalized means we assume space charge has already been multiplied by -q
+    Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
+    where S is the space charge described in p265 of the PDF"""    
+    def forward(self, x, space_charge):
+        return torch.sqrt(normalized_poisson_mse_(x, space_charge, self._x, self._y))

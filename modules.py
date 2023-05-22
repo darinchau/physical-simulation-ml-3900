@@ -1,17 +1,14 @@
 ### Contains all different implementations of the NN modules, including custom layers, custom networks and custom activation
 
-import gc
+from __future__ import annotations
 import torch
 from torch import nn, Tensor
-from load import load_spacing, get_device
-from derivative import poisson_mse_, normalized_poisson_mse_
+from load import get_device
 from abc import ABC, abstractmethod as virtual
 from model_base import Model, ModelBase
-from sklearn.linear_model import TheilSenRegressor, LinearRegression
 from util import straight_line_model
 import numpy as np
 from scipy.optimize import minimize
-import warnings
 
 class Sequential(Model):
     """Sequential model"""
@@ -44,36 +41,6 @@ class Linear(ModelBase):
     def forward(self, x):
         x = self.fc(x)
         return x
-
-class PoissonMSE(Model):
-    """Gives the poisson equation - the value of ||∇²φ - (-q)S||
-    where S is the space charge described in p265 of the PDF 
-    https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
-    def __init__(self, device = None):
-        if device is None:
-            self._device = get_device()
-        else:
-            self._device = device
-        x, y = load_spacing()
-        self._x = x.to(device)
-        self._y = y.to(device)
-    
-    def forward(self, x, space_charge):
-        return poisson_mse_(x, space_charge, self._x, self._y)
-
-class NormalizedPoissonMSE(PoissonMSE):
-    """Normalized means we assume space charge has already been multiplied by -q
-    Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
-    where S is the space charge described in p265 of the PDF"""    
-    def forward(self, x, space_charge):
-        return normalized_poisson_mse_(x, space_charge, self._x, self._y)
-    
-class NormalizedPoissonRMSE(PoissonMSE):
-    """Normalized means we assume space charge has already been multiplied by -q
-    Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
-    where S is the space charge described in p265 of the PDF"""    
-    def forward(self, x, space_charge):
-        return torch.sqrt(normalized_poisson_mse_(x, space_charge, self._x, self._y))
     
 class MSELoss(Model):
     def forward(self, ypred, y) -> Tensor:
@@ -254,72 +221,6 @@ class TrainedLinear(Model):
     
     def eval(self):
         pass
-
-# This model does not need to be trained
-class PoissonJITRegressor(Model):
-    """Use a first model to predict stuff, then use a second model to make them self consistent - aka satisfy the Poisson equation"""
-    def __init__(self, ep1: TrainedLinear, sc1: TrainedLinear):
-        # From the linearity plots, we only need to care about region 2 in practice for space charge
-        # and region 2, 5 for electric potential
-        self.ep1 = ep1
-        self.sc1 = sc1
-        
-    def forward(self, x) -> Tensor:
-        num_data = int(x.shape[0])
-        # xep = x[:, :2193].reshape(-1, 129, 17)
-        # xsc = x[:, 2193:].reshape(-1, 129, 17)
-
-        # naive_prediction = torch.cat([self.ep1(x), self.sc1(x)], dim = 1)
-
-        result = torch.zeros(num_data, 4386)
-        with torch.no_grad():
-            xep = self.ep1(x).cpu().numpy().reshape(-1, 129, 17)
-            xsc = self.sc1(x).cpu().numpy().reshape(-1, 129, 17)
-
-            poisson_loss = NormalizedPoissonRMSE('cpu')
-
-            # Nudge region 2, 5 of ep, region 2 of sc
-            # Refer to anim.py for region codes
-            # The mystery numbers are the number of parameters in different region
-            for i in range(num_data):
-                def reconstruct(x):
-                    ep_region_2 = x[:429].reshape(84 - 45, -1)
-                    ep_region_5 = x[429:663].reshape(84 - 45, -1)
-                    sc_region_2 = x[663:].reshape(84 - 45, -1)
-
-                    reconstructed_ep = xep[i]
-                    reconstructed_ep[45:84,:11] = ep_region_2
-                    reconstructed_ep[45:84,11:] = ep_region_5
-                    reconstructed_ep = torch.tensor(reconstructed_ep.reshape(1, 129, 17))
-
-                    reconstructed_sc = xsc[i]
-                    reconstructed_sc[45:84,:11] = sc_region_2
-                    reconstructed_sc = torch.tensor(reconstructed_sc.reshape(1, 129, 17))
-
-                    return reconstructed_ep, reconstructed_sc
-                
-                def minimize_me(x):
-                    reconstructed_ep, reconstructed_sc = reconstruct(x)
-                    mse = poisson_loss(reconstructed_ep, reconstructed_sc)
-                    return float(mse.item())
-                
-                ep_region_2 = xep[i,45:84,:11].reshape(-1)
-                ep_region_5 = xep[i,45:84,11:].reshape(-1)
-                sc_region_2 = xsc[i,45:84,:11].reshape(-1)
-
-                joined = np.concatenate([ep_region_2, ep_region_5, sc_region_2])
-                bounds = [(0, 1)] * 663 + [(-20, 20)] * 429
-                gradient_descent = minimize(minimize_me, x0 = joined, bounds = bounds)
-                grad_result = gradient_descent.x
-                new_ep, new_sc = reconstruct(grad_result)
-                result[i][:2193] = new_ep.reshape(-1)
-                result[i][2193:] = new_sc.reshape(-1)
-
-                # print(f"Frame {i}: Difference: {torch.mean(torch.abs(naive_prediction[i] - result[i]))}", end = "")
-
-                # poi = poisson_loss(new_ep, new_sc)
-                # print(f" Poisson loss: {poi}")
-        return result
     
 class LSTMStack(Model):
     """Reshapes the model before feeding into an LSTM or cached linear (etc.) model. The inner implementation is just a reshape inside a try-catch block"""
@@ -388,68 +289,3 @@ class Cached(Model):
     def _class_name(self) -> str:
         return f"Cached (N = {self.N})"
 
-class PrincipalComponentExtractor(Model):
-    """Takes the tensor x, and returns the principal d dimensions by calculating its covariance matrix. d indicates the number of principal components to extract"""
-    def __init__(self, d: int, /, device = None):
-        self.d = d
-        self.eigenvectors = None
-
-        if device is None:
-            self._device = get_device()
-        else:
-            self._device = device
-
-    def fit(self, X: Tensor):
-        """X is a (n_data, n_features). This computes the projection data for PCA. Returns None. If you really need to access the projection data, it is at `model.pdata` and it should be a tensor with shape (N, n_features). The sorted eigenvalues is at `model.eigenvalues` and the sorted eigenvectors are at `model.eigenvectors`"""
-        cov = torch.cov(X.T.float())
-        l, v = torch.linalg.eig(cov)
-
-        # Temporarily supress warnings. This normally screams at us for discarding the complex part. But X.T @ X is always positive definite so real eigenvalues :)
-        warnings.filterwarnings("ignore", category=UserWarning) 
-        self.eigenvalues, sorted_eigenidx = torch.abs(l.double()).sort(descending=True)
-        self.eigenvectors = v[:, sorted_eigenidx].double()
-        warnings.filterwarnings("default", category=UserWarning)
-
-    def project(self, X: Tensor) -> Tensor:
-        """X is a (n_data, n_features) tensor. This performs the projection for you and returns an (n_data, d) tensor. Raises a runtime error if n_features does not match that in training"""
-        if self.eigenvectors is None:
-            raise RuntimeError("Projection data has not been calculated yet. Please first call model.fit()")
-        
-        P = self.eigenvectors[:, :self.d]
-        
-        if X.shape[1] != P.shape[0]:
-            raise RuntimeError(f"Expects {P.shape[0]}-dimensional data due to training. Got {X.shape[1]}-d data instead.")
-        
-        # Welcome to transpose hell
-        X_ = X - torch.mean(X.float(), dim = 0)
-        components = X_.double() @ P
-        return components
-    
-    def unproject(self, X: Tensor):
-        """Try to compute the inverse of model.project(X). The input is a tensor of shape (n_data, d) and returns a tensor of (n_data, n_features)"""
-        # XP = X* so given X* we have X = X*P⁻¹
-        # Problem is P is a matrix of shape (n_features, d), so we need to make it square first to take inverse.
-        # However, P is originally (n_features, n_features) big which we can take inverses, the reason
-        # P has the shape (n, d) is because it is actually the combination of the real P matrix followed by extracting first N columns
-        # We use a workaround: append zeros on X until it has enough features, then use the full P inverse
-        if self.eigenvectors is None:
-            raise RuntimeError("Projection data has not been calculated yet. Please first call model.fit()")
-
-        X_ = torch.zeros(X.shape[0], self.eigenvalues.shape[0])
-        X_[:, :X.shape[1]] = X
-        X_ = X_.double()
-        P = self.eigenvectors
-        try:
-            result = X_ @ torch.linalg.inv(P)
-        except RuntimeError as e:
-            # raise RuntimeError(f"PCA eigenvectors matrix is not invertible for some reason. This is probably due to that there are very very very small (coerced to 0) eigenvalues.\n\nOriginal error: \"\"\"\n{e}\n\"\"\"")
-            # Use a psuedoinverse if the inverse is not available
-            # Also A @ B = (B.T @ A.T).T
-            result =  torch.linalg.lstsq(P.T, X_.T).solution.T
-        return result
-        
-    
-    def forward(self, X: Tensor) -> Tensor:
-        """fit followed by project."""
-        self.fit(X)
-        return self.project(X)
