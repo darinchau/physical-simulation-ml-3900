@@ -14,6 +14,7 @@ import util
 from typing import Callable
 from tqdm import tqdm
 from multiprocessing import Pool
+import warnings
 
 # A class wrapper to help us plot data. We assume all error checking has been done
 class AnimationMaker:
@@ -35,7 +36,7 @@ class AnimationMaker:
             vmin = np.min(data)
         if vmax is None:
             vmax = np.max(data)
-        self.datas.append((data, title, vmin, vmax, norm))
+        self.datas.append((data, title, vmin, vmax))
         self.height_ratios.append(5)
         return self
 
@@ -49,7 +50,7 @@ class AnimationMaker:
         self.height_ratios.append(1)
         return self
 
-    def save(self, path, suptitle = ""):
+    def save(self, path, suptitle = "", cmap = 'hot'):
         # If nframes if not set this means there is no data to plot
         if self.nframes is None:
             raise ValueError("No data to plot")
@@ -74,17 +75,14 @@ class AnimationMaker:
         for i in range(num_data):
             # Plot an animation
             if self.height_ratios[i] == 5:
-                data, title, vmin, vmax, norm = self.datas[i]
+                data, title, vmin, vmax = self.datas[i]
 
                 axes[i].set_aspect("equal", adjustable="box")
                 axes[i].set_ylabel("Y", va="bottom")
                 axes[i].set_title(title)
                 axes[i].set_yticks([])
                 
-                if norm is not None and norm == 'log':
-                    heatmap = axes[i].pcolormesh(x, y, np.transpose(data[0]), cmap="hot", norm=LogNorm(vmin=vmin, vmax=vmax))
-                else:
-                    heatmap = axes[i].pcolormesh(x, y, np.transpose(data[0]), cmap="hot", vmin=vmin, vmax=vmax)
+                heatmap = axes[i].pcolormesh(x, y, np.transpose(data[0]), cmap=cmap, vmin=vmin, vmax=vmax)
 
                 # colorbar
                 cbar = fig.colorbar(heatmap, ax=axes[i])
@@ -141,8 +139,8 @@ def make_dem_animation(ypred, y) -> AnimationMaker:
     error = np.abs(ypred - y)
     anim.add_data(error, "Error", 0)
 
-    err_log_10, log_vmin = log_diff(ypred, y)
-    anim.add_data(err_log_10, "Error log plot", vmin = log_vmin)
+    err_log_10 = log_diff(ypred, y)
+    anim.add_data(err_log_10, "Error log plot")
 
     rmse = np.sqrt(np.mean((ypred - y) ** 2))
     worst = np.max(np.abs(ypred - y))
@@ -163,8 +161,8 @@ def make_debug_animation(ypred, y) -> AnimationMaker:
     anim.add_data(ypred, "Predicted data")
 
     frame_zero = np.zeros((101, 1, 1)) + ypred[0]
-    diff_log_10, log_vmin = log_diff(ypred, frame_zero)
-    anim.add_data(diff_log_10, "Evolution (log)", vmin = log_vmin)
+    diff_log_10 = log_diff(ypred, frame_zero)
+    anim.add_data(diff_log_10, "Evolution (log)")
     
     anim.add_text([f"RMSE: {np.sqrt(np.mean((ypred[i] - y[i]) ** 2)):.7f}" for i in range(101)])
     anim.add_text([f"Worst: {np.max(np.abs(ypred[i] - y[i])):.7f}" for i in range(101)])
@@ -413,25 +411,18 @@ class DataVisualizer:
 
 def log_diff(x, y):
     if isinstance(x, Tensor):
-        error = torch.abs(x - y)
-        err_log_10 = torch.log10(error)
-        try:
-            t = torch.min(err_log_10[error > 0])
-            err_log_10[error <= 0] = t
-            return err_log_10, float(t)
-        except ValueError as e:
-            pass
-    else:
-        error = np.abs(x - y)
-        err_log_10 = np.log10(error)
-        try:
-            t = float(np.min(err_log_10[error > 0]))
-            err_log_10[error <= 0] = t
-            return err_log_10, t
-        except ValueError as e:
-            pass
-    err_log_10[error < 1e-20] = -20
-    return err_log_10, -20
+        x = x.detach().numpy()
+    
+    if isinstance(y, Tensor):
+        y = y.detach().numpy()
+
+    warnings.filterwarnings('ignore', category=RuntimeWarning)
+    result = np.log10(np.abs(x - y))
+    warnings.filterwarnings('default', category=RuntimeWarning)
+    x = np.nanmin(result[np.isfinite(result)])
+    result = np.nan_to_num(result, nan=x, posinf=x, neginf=x)
+    return result
+
 
 def heatmat_fn_plot(f: Callable[[float, float], float], xrange: tuple[int, int] = (-5, 5), yrange: tuple[int, int] = (-5, 5), resolution = 100):
     """Plot the function as a heatmap.

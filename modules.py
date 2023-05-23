@@ -37,6 +37,7 @@ class Linear(ModelBase):
     """Linear layer"""
     def __init__(self, in_size: int, out_size: int):
         self.fc = nn.Linear(in_size, out_size)
+        torch.nn.init.xavier_uniform(self.fc.weight)
     
     def forward(self, x):
         x = self.fc(x)
@@ -58,22 +59,24 @@ class LeakySigmoid(Model):
     _info_show_impl_details = False
 
     def __init__(self):
-        self.inited = False
+        self.inited = None
 
     def forward(self, x):
-        if not self.inited:
+        if self.inited is None:
             self.leak = nn.Linear(x.shape[1], 1)
-            self.inited = True
+            self.inited = x.shape[1]
+        elif x.shape[1] != self.inited:
+            raise RuntimeError(f"X shape is not consistent. Expects {self.inited} features from last pass but got {x.shape} features")
         leakage = self.leak(x)
         return leakage * x + torch.sigmoid(x)
     
     def _num_trainable(self) -> int:
-        if self.inited:
+        if self.inited is not None:
             return sum(p.numel() for p in self.leak.parameters() if p.requires_grad)
         return 0
     
     def eval(self):
-        if self.inited:
+        if self.inited is not None:
             self.leak.eval()
     
 class Tanh(Model):
@@ -244,48 +247,60 @@ class Cached(Model):
     This has the advantage of forcing the model to remember only the last N results.
     
     If the original should take in `in` features and output `out` features, then
-    - `fc`: A model that takes in `in` + `N` * `out`
+    - `fc`: A model that takes in `in` + `N` * `out` and outputs `out` features
     - `N` is the number of results we want to cache"""
     _info_show_impl_details = False
-    def __init__(self, fc: Model, N: int, / , device = None):
+    def __init__(self, in_size: int, out_size: int, N: int, fc: Model, * , device = None):
+        self.in_size = in_size
+        self.out_size = out_size
         self.N = N
         if device is None:
             self._device = get_device()
         else:
             self._device = device
-        self.inited = False
         self.fc = fc
-    
+
     def forward(self, x: Tensor) -> Tensor:
-        # Input shape here is always (n terms in sequence, n_features)
-        cached_state_ = torch.zeros((self.N, self.out_size)).to(self._device).double()
-        
-        results = torch.zeros((x.shape[0], self.out_size))
+        return self.fc(x)
 
-        for i in range(x.shape[0]):
-            # Predict and then cache the output state
-            x_ = torch.concat([x[i], results.reshape(-1)])
-            y = self.fc(x_)
-            cached_state_[1:] = cached_state_[:-1]
-            cached_state_[0] = y
-            results[i] = y
+    @property
+    def inited(self):
+        if not hasattr(self, "_inited"):
+            return False
+        return self._inited
 
-        return results
-
-    def __call__(self, x):
+    def __call__(self, x: Tensor):
         """Input is 
             (N, n_features) - we will pretend the whole thing is one giant sequence, or 
             (N, n terms in sequence, n_features): the sequences are separated :)
             
         Output is:
             (N, n_features_out) or (N, n terms in sequence, n_out_features) respectively"""
-        if len(x.shape) == 3:
-            results = torch.zeros(x.shape[0], x.shape[1], self.out_layers)
-            for i in range(x.shape[0]):
-                results[i] = super().__call__(x[i])
-            return results
-        return super().__call__(x)
-    
-    def _class_name(self) -> str:
-        return f"Cached (N = {self.N})"
 
+        if not self.inited:
+            raise RuntimeError("The cached model has not been initialized")
+        
+        if len(x.shape) == 3:
+            results = torch.zeros(x.shape[0], x.shape[1], self.out_size)
+            for i in range(x.shape[0]):
+                # Use recursion to fall back to the 2d case
+                results[i] = Cached.__call__(self, x[i])
+            return results
+        
+        # cached_[i] is the ith last result. Defaults to 0
+        cached_state_ = torch.zeros((self.N, self.out_size)).to(self._device).double()
+        results = torch.zeros((x.shape[0], self.out_size))
+
+        for i in range(x.shape[0]):
+            # Predict
+            x_ = torch.concat([x[i], results.reshape(-1)]).reshape(1, -1)
+            y = super().__call__(x_)
+
+            # Store the cached state
+            cached_state_[1:] = cached_state_[:-1]
+            cached_state_[0] = y
+
+            # Store the result
+            results[i] = y
+
+        return results

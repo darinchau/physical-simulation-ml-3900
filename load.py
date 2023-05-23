@@ -37,7 +37,7 @@ def load_space_charge() -> Tensor:
     return torch.tensor(np.nan_to_num(SPACE_CHARGE, nan=0))
 
 def load_materials() -> Tensor:
-    return torch.tensor(MATERIALS)
+    return torch.tensor(MATERIALS == 1)
 
 def load_contacts() -> Tensor:
     return torch.tensor(CONTACTS)

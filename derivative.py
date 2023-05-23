@@ -12,11 +12,8 @@ __all__ = (
     "PoissonLoss"
 )
 
-def boundary_condition_(data, result, eps, x, y):
-    
-
 # Wrapper around albert's function, without the division by -Q
-def laplacian_(data, result, eps, x, y):
+def laplacian_inner_(data, result, eps, x, y):
     """Calculate the LHS of poisson equation"""
     xr, yr, epr = x[1:-1].view(-1, 1), y[2:], data[:, 1:-1, 2:]
     xd, yd, epd = x[2:].view(-1, 1), y[1:-1], data[:, 2:, 1:-1]
@@ -43,7 +40,7 @@ def laplacian_(data, result, eps, x, y):
     result[:, 1:-1, 1:-1] = div_cm
     return result
 
-def poisson_lhs(data: Tensor | NDArray, x: Tensor | NDArray, y: Tensor | NDArray) -> Tensor | NDArray:
+def poisson_lhs(data: Tensor, x: Tensor, y: Tensor) -> Tensor:
     # Currently assumed that only silicon is everywhere
     # Later, will need to adjust for the silicon-oxide interface
     relative_permittivity_silicon = 11.7
@@ -53,30 +50,36 @@ def poisson_lhs(data: Tensor | NDArray, x: Tensor | NDArray, y: Tensor | NDArray
     
     # Actual dielectric permittivity = permittivity of free space * permittivity of material
     # Initialize result array
-    if isinstance(data, Tensor):
-        eps = torch.fill(torch.zeros_like(data[:1]), e0_cm * relative_permittivity_silicon)
-        result = torch.zeros_like(data)
-    elif isinstance(data, np.ndarray):
-        result = np.zeros_like(data)
-        eps = np.full_like(data[:1], e0_cm * relative_permittivity_silicon)
-    else:
-        raise TypeError(f"data (type: {type(data).__name__}) is neither a Tensor or a numpy array")
+    eps = torch.fill(torch.zeros_like(data[:1]), e0_cm * relative_permittivity_silicon)
+    result = torch.zeros_like(data)
     
     # Calculate the center
-    result = laplacian_(data, result, eps, x, y)
+    result = laplacian_inner_(data, result, eps, x, y)
 
     # Update the boundary conditions
+    return result
 
-def normalized_poisson_mse_(data, space_charge, x, y):
+def normalized_poisson_mse_(data: Tensor, space_charge: Tensor, x: Tensor, y: Tensor):
     ep = data.reshape(-1, 129, 17)
     sc = space_charge.reshape(-1, 129, 17)
     ys = (1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15)
     lapla = poisson_lhs(ep, x, y)
-    if isinstance(data, Tensor):
-        return torch.mean((sc[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2)
-    elif isinstance(data, np.ndarray):
-        return np.mean((sc[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2)
-    raise TypeError
+    return torch.mean((sc[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2)
+    
+def npmse_(data, sc, x, y):
+    if isinstance(data, np.ndarray):
+        d = torch.tensor(data)
+    elif isinstance(data, Tensor):
+        d = data
+    else:
+        raise TypeError(f"data (type: {type(data).__name__}) is neither a Tensor or a numpy array")
+
+    plhs = normalized_poisson_mse_(d, sc, x, y)
+
+    if isinstance(data, np.ndarray):
+        plhs = plhs.detach().numpy()
+
+    return plhs
 
 def poisson_mse_(data, space_charge, x, y):
     """Returns a single number indicating the poisson rmse over the range profided"""
