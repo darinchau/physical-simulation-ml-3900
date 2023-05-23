@@ -19,10 +19,7 @@ class PrincipalComponentExtractor(Model):
         self.d = d
         self.eigenvectors = None
 
-        if device is None:
-            self._device = get_device()
-        else:
-            self._device = device
+        self._device = Device(device)
 
     def fit(self, X: Tensor):
         """X is a (n_data, n_features). This computes the projection data for PCA. Returns None. If you really need to access the projection data, it is at `model.pdata` and it should be a tensor with shape (N, n_features). The sorted eigenvalues is at `model.eigenvalues` and the sorted eigenvectors are at `model.eigenvectors`"""

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from collections.abc import Iterator
 import gc
 import torch
@@ -123,9 +124,7 @@ class TrainingIndex(tuple):
         self.name = name
         return self
 
-    def include(self):
-        return list(range(self.start, self.stop))
-    
+
 # For easy access of training indices
 class TrainingIndexContainer:
     def __init__(self, ls) -> None:

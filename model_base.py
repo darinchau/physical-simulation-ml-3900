@@ -5,12 +5,13 @@ import torch
 from torch import nn, Tensor
 import pickle
 from typing import Any, Optional, Self
-from load import get_device
 import matplotlib.pyplot as plt
 from tqdm import trange
 import time
 from abc import ABC, abstractmethod as virtual
+from load import Device
 import ast
+from util import TrainingIndex
 
 def get(self, attr_name):
     try:
@@ -181,6 +182,17 @@ class Model(ABC):
 {line}
 """
 
+    def to(self, device):
+        for _, p in self._model_children():
+            p.to(device)
+        return self
+
+    def double(self):
+        return self.to(torch.float64)
+
+    def float(self):
+        return self.to(torch.float32)
+
     def __repr__(self):
         return self._class_name()
 
@@ -201,6 +213,11 @@ class Model(ABC):
             self.eval()
         
         return self.forward(*x)
+    
+    def _parameters(self):
+        for _, p in self._model_children():
+            for param in p._parameters():
+                yield param
     
 class ModelBase(Model):
     """Models base objects are layers directly from pytorch. Serialize gives state dict and there are no module children for us to loop over"""
@@ -235,6 +252,10 @@ class ModelBase(Model):
             raise TypeError(f"self._model must be a pytorch module. Found type: {type(self._model[0]).__name__}")
         
         return self._model[0]
+    
+    def to(self, device):
+        self.model.to(device)
+        return self
     
     def _pickel(self):
         # First get name to the model reference
@@ -273,9 +294,15 @@ class ModelBase(Model):
     
     def _model_children(self):
         raise NotImplementedError(f"Model (type: {self._class_name()}) children is not recursive in nature. One must implement all base cases if one inherits from model base")
+    
+    def _parameters(self):
+        for p in self.model.parameters():
+            yield p
 
 class Trainer(Model):
-    """A special type of model designed to train other models. This provides the `self.history` attribute in which one can log the losses"""
+    """A special type of model designed to train other models. This provides the `self.history` attribute in which one can log the losses
+    
+    `add_loss()`, `log()` avaiable"""
     @property
     def history(self) -> History:
         if not hasattr(self, '_history'):
@@ -288,18 +315,18 @@ class Trainer(Model):
             self._training = False
         return self._training
     
-    def update(self):
+    def _update(self):
         self.history.update()
 
-    def train(self):
+    def _train(self):
         self._training = True
 
-    def test(self):
+    def _test(self):
         self._training = False
 
     def forward(self, x: Tensor, y: Tensor) -> Tensor:
         """Takes in x and y and returns the loss. Keep in mind a `self.history` History object is available"""
-        return super().forward(x, y)
+        raise NotImplementedError
 
     def __call__(self, x, y) -> Tensor:        
         er = super().__call__(x, y)
@@ -373,12 +400,10 @@ class History:
 
 def fit(
         model: Trainer, 
-        xtrain: Tensor, 
-        ytrain: Tensor, 
-        xtest: Tensor, 
-        ytest: Tensor, 
+        x: Tensor, 
+        y: Tensor,
+        idx: TrainingIndex,
         optim: torch.optim.Optimizer = None, 
-        device: torch.device | str = None,
         epochs: int = 100
     ) -> Trainer:
     """Provides us with the sklearn like interface which abstracts away the training loop. However, a dedicated trained has to be created. 
@@ -389,30 +414,28 @@ def fit(
     
     Returns the trained trainer"""
     if optim is None:
-        optim = torch.optim.Adam(model.parameters(), lr = 0.005)
+        optim = torch.optim.Adam(model._parameters(), lr = 0.005)
 
-    if device is None:
-        device = get_device()
-
+    device = Device()
     net = model.to(device).double()
-    xtrain = xtrain.to(device).double()
-    xtest = xtest.to(device).double()
-    ytrain = ytrain.to(device).double()
-    ytest = ytest.to(device).double()
+    xtrain = x[idx].to(device).double()
+    xtest = x.to(device).double()
+    ytrain = y[idx].to(device).double()
+    ytest = y.to(device).double()
 
     # Show a lovely progress bar
 
     epochs_pbar = trange(epochs)
 
     for epoch in epochs_pbar:
-        net.train()
+        net._train()
         trainloss = 0.
         for x, y in zip(xtrain, ytrain):
             def closure():
                 if torch.is_grad_enabled():
                     optim.zero_grad()
 
-                loss = net(x, y)
+                loss = net(x.reshape(1, -1), y.reshape(1, -1))
 
                 if loss.requires_grad:
                     loss.backward()
@@ -423,14 +446,13 @@ def fit(
                 return loss
             optim.step(closure)
         
-        net.test()
+        net._test()
         testloss = 0.
-        with torch.no_grad():
-            for (x, y) in zip(xtest, ytest):
-                loss = net(x, y)
-                testloss += loss.item()
+        for (x, y) in zip(xtest, ytest):
+            loss = net(x.reshape(1, -1), y.reshape(1, -1))
+            testloss += loss.item()
 
-        log = f"On epoch {epoch}, train loss = {float(trainloss/len(xtrain)):.7f}, test loss = {float(testloss/len(xtest)):.7f}"
+        log = f"On epoch {epoch + 1}, train loss = {float(trainloss/len(xtrain)):.7f}, test loss = {float(testloss/len(xtest)):.7f}"
         epochs_pbar.set_description(log)
 
     return net

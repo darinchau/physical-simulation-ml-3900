@@ -16,9 +16,14 @@ MATERIALS = np.load("./simulation data/mesh_data_materials.npy")
 CONTACTS = np.load("./simulation data/mesh_data_contacts.npy")
 
 # Get Cuda if cuda is available
-def get_device():
-    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # return torch.device('cpu')
+class Device(str):
+    """Helps you automatically determine the device"""
+    def __new__(cls, device: str = None):
+        if isinstance(device, Device) or device:
+            a = device
+        else:
+            a = 'cuda' if torch.cuda.is_available() else 'cpu'
+        return super().__new__(cls, a)
 
 def load_vgs():
     return torch.arange(101).reshape(101, 1) / 100 * 0.75

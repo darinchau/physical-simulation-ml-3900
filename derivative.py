@@ -1,9 +1,10 @@
 from __future__ import annotations
 import numpy as np
 import torch
-from load import load_spacing, get_device
+from load import load_spacing, Device
 from numpy.typing import NDArray
 from torch import Tensor, nn
+import warnings
 from model_base import Model
 
 __all__ = (
@@ -50,8 +51,8 @@ def poisson_lhs(data: Tensor, x: Tensor, y: Tensor) -> Tensor:
     
     # Actual dielectric permittivity = permittivity of free space * permittivity of material
     # Initialize result array
-    eps = torch.fill(torch.zeros_like(data[:1]), e0_cm * relative_permittivity_silicon)
-    result = torch.zeros_like(data)
+    eps = torch.fill(torch.zeros_like(data[:1]), e0_cm * relative_permittivity_silicon).to(Device())
+    result = torch.zeros_like(data).to(Device())
     
     # Calculate the center
     result = laplacian_inner_(data, result, eps, x, y)
@@ -64,13 +65,16 @@ def normalized_poisson_mse_(data: Tensor, space_charge: Tensor, x: Tensor, y: Te
     sc = space_charge.reshape(-1, 129, 17)
     ys = (1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15)
     lapla = poisson_lhs(ep, x, y)
-    return torch.mean((sc[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2)
+    warnings.filterwarnings('ignore', category=UserWarning)
+    s = torch.mean((torch.tensor(sc)[:, 1:-1, ys] - lapla[:, 1:-1, ys]) ** 2)
+    warnings.filterwarnings('default', category=UserWarning)
+    return s
     
 def npmse_(data, sc, x, y):
     if isinstance(data, np.ndarray):
-        d = torch.tensor(data)
+        d = torch.tensor(data).to(Device())
     elif isinstance(data, Tensor):
-        d = data
+        d = data.to(Device())
     else:
         raise TypeError(f"data (type: {type(data).__name__}) is neither a Tensor or a numpy array")
 
@@ -85,7 +89,7 @@ def poisson_mse_(data, space_charge, x, y):
     """Returns a single number indicating the poisson rmse over the range profided"""
     q = 1.60217663e-19
     sc = space_charge * -q
-    return normalized_poisson_mse_(data, sc, x, y)
+    return npmse_(data, sc, x, y)
 
 
 def poisson_rmse(data: Tensor | NDArray, space_charge: Tensor | NDArray):
@@ -99,28 +103,29 @@ class PoissonMSE(Model):
     """Gives the poisson equation - the value of ||∇²φ - (-q)S||
     where S is the space charge described in p265 of the PDF 
     https://www.researchgate.net/profile/Nabil-Ashraf/post/How-to-control-the-slope-of-output-characteristicsId-Vd-of-a-GAA-nanowire-FET-which-shows-flat-saturated-region/attachment/5de3c15bcfe4a777d4f64432/AS%3A831293646458882%401575207258619/download/Synopsis_Sentaurus_user_manual.pdf"""    
-    def __init__(self, device = None):
-        if device is None:
-            self._device = get_device()
-        else:
-            self._device = device
+    def __init__(self):
         x, y = load_spacing()
-        self._x = x.to(device)
-        self._y = y.to(device)
+        self._x = x.to(Device())
+        self._y = y.to(Device())
     
     def forward(self, x, space_charge):
         return poisson_mse_(x, space_charge, self._x, self._y)
+    
+    def to(self, device):
+        self._x.to(device)
+        self._y.to(device)
+        return self
 
 class NormalizedPoissonMSE(PoissonMSE):
     """Normalized means we assume space charge has already been multiplied by -q
     Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
     where S is the space charge described in p265 of the PDF"""    
     def forward(self, x, space_charge):
-        return normalized_poisson_mse_(x, space_charge, self._x, self._y)
+        return npmse_(x, space_charge, self._x, self._y)
     
 class NormalizedPoissonRMSE(PoissonMSE):
     """Normalized means we assume space charge has already been multiplied by -q
     Gives the poisson equation - the value of sqrt(||∇²φ - (-q)S||)
     where S is the space charge described in p265 of the PDF"""    
     def forward(self, x, space_charge):
-        return torch.sqrt(normalized_poisson_mse_(x, space_charge, self._x, self._y))
+        return torch.sqrt(npmse_(x, space_charge, self._x, self._y))

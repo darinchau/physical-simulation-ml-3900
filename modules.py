@@ -3,12 +3,12 @@
 from __future__ import annotations
 import torch
 from torch import nn, Tensor
-from load import get_device
 from abc import ABC, abstractmethod as virtual
 from model_base import Model, ModelBase
 from util import straight_line_model
 import numpy as np
 from scipy.optimize import minimize
+from load import Device
 
 class Sequential(Model):
     """Sequential model"""
@@ -36,8 +36,8 @@ class Sequential(Model):
 class Linear(ModelBase):
     """Linear layer"""
     def __init__(self, in_size: int, out_size: int):
-        self.fc = nn.Linear(in_size, out_size)
-        torch.nn.init.xavier_uniform(self.fc.weight)
+        self.fc = nn.Linear(in_size, out_size).double()
+        torch.nn.init.xavier_uniform_(self.fc.weight)
     
     def forward(self, x):
         x = self.fc(x)
@@ -60,25 +60,25 @@ class LeakySigmoid(Model):
 
     def __init__(self):
         self.inited = None
+        self.tos = []
 
     def forward(self, x):
         if self.inited is None:
-            self.leak = nn.Linear(x.shape[1], 1)
+            self.leak = Linear(x.shape[1], 1)
             self.inited = x.shape[1]
+            for device in self.tos:
+                self.leak.to(device)
         elif x.shape[1] != self.inited:
             raise RuntimeError(f"X shape is not consistent. Expects {self.inited} features from last pass but got {x.shape} features")
         leakage = self.leak(x)
         return leakage * x + torch.sigmoid(x)
     
-    def _num_trainable(self) -> int:
-        if self.inited is not None:
-            return sum(p.numel() for p in self.leak.parameters() if p.requires_grad)
-        return 0
-    
-    def eval(self):
-        if self.inited is not None:
-            self.leak.eval()
-    
+    def to(self, device):
+        if not self.inited:
+            self.tos.append(device)
+        else:
+            self.leak.to(device)
+            
 class Tanh(Model):
     def forward(self, x: Tensor) -> Tensor:
         return torch.tanh(x)
@@ -93,9 +93,6 @@ class StochasticNode(Model):
     _info_show_impl_details = False
 
     def __init__(self, in_size, out_size, *, device = None):
-        if device is None:
-            device = get_device()
-
         # Use tanh for mu to constrain it around 0
         self.lmu = Linear(in_size, out_size)
         self.smu = Tanh()
@@ -103,6 +100,8 @@ class StochasticNode(Model):
         # Use sigmoid for sigma to constrain it to positive values and around 1
         self.lsi = Linear(in_size, out_size)
         self.ssi = Sigmoid()
+
+        device = Device(device)
 
         # Move device to cuda if possible
         self._N = torch.distributions.Normal(torch.tensor(0).float().to(device), torch.tensor(1).float().to(device))
@@ -139,14 +138,22 @@ class StochasticNode(Model):
         self.lmu.eval()
         self.smu.eval()
 
+class LSTM_(ModelBase):
+    def __init__(self, i, h, l):
+        self.lstm = nn.LSTM(input_size=i, hidden_size=h, num_layers=l)
+        torch.nn.init.xavier_uniform_(self.lstm.weight)
+    
+    def forward(self, x: Tensor) -> Tensor:
+        return self.lstm(x)
+
 class LSTM(Model):
     """An lstm node."""
     _info_show_impl_details = False
 
     def __init__(self, input_dims, hidden_dims, output_dims, *, layers = 2):
         self.out_layers = output_dims
-        self.lstm = nn.LSTM(input_size=input_dims, hidden_size = hidden_dims, num_layers = layers)
-        self.linear = nn.Linear(hidden_dims, output_dims)
+        self.lstm = LSTM_(input_dims, hidden_dims, layers)
+        self.linear = Linear(hidden_dims, output_dims)
 
     def forward(self, x: Tensor):
         out, _ = self.lstm(x)
@@ -241,66 +248,3 @@ class Flatten(Model):
     """Reshapes the tensor back to (N, n_features)"""
     def forward(self, x: Tensor) -> Tensor:
         return x.reshape(1, -1)
-
-class Cached(Model):
-    """Caches the previous output and uses it for the next prediction. The only difference with an LSTM is we save the prediction state instead of a separate hidden state
-    This has the advantage of forcing the model to remember only the last N results.
-    
-    If the original should take in `in` features and output `out` features, then
-    - `fc`: A model that takes in `in` + `N` * `out` and outputs `out` features
-    - `N` is the number of results we want to cache"""
-    _info_show_impl_details = False
-    def __init__(self, in_size: int, out_size: int, N: int, fc: Model, * , device = None):
-        self.in_size = in_size
-        self.out_size = out_size
-        self.N = N
-        if device is None:
-            self._device = get_device()
-        else:
-            self._device = device
-        self.fc = fc
-
-    def forward(self, x: Tensor) -> Tensor:
-        return self.fc(x)
-
-    @property
-    def inited(self):
-        if not hasattr(self, "_inited"):
-            return False
-        return self._inited
-
-    def __call__(self, x: Tensor):
-        """Input is 
-            (N, n_features) - we will pretend the whole thing is one giant sequence, or 
-            (N, n terms in sequence, n_features): the sequences are separated :)
-            
-        Output is:
-            (N, n_features_out) or (N, n terms in sequence, n_out_features) respectively"""
-
-        if not self.inited:
-            raise RuntimeError("The cached model has not been initialized")
-        
-        if len(x.shape) == 3:
-            results = torch.zeros(x.shape[0], x.shape[1], self.out_size)
-            for i in range(x.shape[0]):
-                # Use recursion to fall back to the 2d case
-                results[i] = Cached.__call__(self, x[i])
-            return results
-        
-        # cached_[i] is the ith last result. Defaults to 0
-        cached_state_ = torch.zeros((self.N, self.out_size)).to(self._device).double()
-        results = torch.zeros((x.shape[0], self.out_size))
-
-        for i in range(x.shape[0]):
-            # Predict
-            x_ = torch.concat([x[i], results.reshape(-1)]).reshape(1, -1)
-            y = super().__call__(x_)
-
-            # Store the cached state
-            cached_state_[1:] = cached_state_[:-1]
-            cached_state_[0] = y
-
-            # Store the result
-            results[i] = y
-
-        return results
