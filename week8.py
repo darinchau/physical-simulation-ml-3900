@@ -8,6 +8,17 @@ from scipy.optimize import minimize
 from anim import *
 import util
 import matplotlib.pyplot as plt
+from load import *
+from torch import Tensor, nn
+import torch
+from anim import *
+from model_base import Model, Trainer
+from modules import *
+from derivative import NormalizedPoissonRMSE
+
+ROOT = "./Datas/Week 8"
+
+Q = 1.60217663e-19
 
 ROOT = "./Datas/Week 8"
 
@@ -155,3 +166,105 @@ class PoissonJITRegressor(Model):
                 # poi = poisson_loss(new_ep, new_sc)
                 # print(f" Poisson loss: {poi}")
         return result
+    
+sc = load_space_charge() * -Q
+ep = load_elec_potential()
+vg = load_vgs()
+ma = load_materials()
+co = load_contacts()
+sx, sy = load_spacing()
+    
+def extract(ep, sc):
+    xep = ep.reshape(-1, 129, 17)
+    xsc = sc.reshape(-1, 129, 17)
+            
+    ep_region_2 = xep[:, 45:84,:11].reshape(-1, 429)
+    ep_region_5 = xep[:, 45:84,11:].reshape(-1, 234)
+    sc_region_2 = xsc[:, 45:84,:11].reshape(-1, 429)
+
+    joined = torch.cat([ep_region_2, ep_region_5, sc_region_2], dim = 1)
+
+    return joined
+
+def reconstruct(x, xep, xsc):
+    ep_region_2 = x[:, :429].reshape(-1, 39, 11)
+    ep_region_5 = x[:, 429:663].reshape(-1, 39, 6)
+    sc_region_2 = x[:, 663:].reshape(-1, 39, 11)
+
+    xep = xep.clone()
+    xep[:, 45:84,:11] = ep_region_2
+    xep[:, 45:84,11:] = ep_region_5
+    xep = xep.reshape(-1, 129, 17)
+
+    xsc = xsc.clone()
+    xsc[:, 45:84,:11] = sc_region_2
+    xsc = xsc.reshape(-1, 129, 17)
+
+    return xep, xsc
+
+class PoissonFixModel(Model):
+    def __init__(self, device = None):
+        self.fc = Sequential(
+            Linear(1 + 4386 * 3, 4386),
+            LeakySigmoid()
+        )
+
+    def forward(self, X: Tensor) -> Tensor:
+        # This inner model should accept 1 + 4386 * 3 variables and output 4386 things
+        cached_state_ = torch.zeros(3, 4386).to(Device()).double()
+        results = torch.zeros(X.shape[0], 4386).to(Device()).double()
+
+        poi = NormalizedPoissonRMSE()
+
+        # Predict for each variable
+        for i in range(X.shape[0]):
+            # Predict
+            x_ = torch.concat([X[i], cached_state_.reshape(-1)]).reshape(1, -1)
+            x_ = self.fc(x_) # Shape should be 1, 4386
+
+            # Gradient descent
+            xep = x_[:, :2193].reshape(-1, 129, 17).detach()
+            xsc = x_[:, 2193:].reshape(-1, 129, 17).detach()
+            x = extract(xep, xsc).clone().detach()
+            x.requires_grad = True
+            optim = torch.optim.Adam([x])
+            for _ in range(20):
+                optim.zero_grad()
+                rep, rsc = reconstruct(x, xep, xsc)
+                poi_loss = poi(rep, rsc)
+                poi_loss.backward()
+                optim.step()
+
+            # Reconstruct x
+            rep, rsc = reconstruct(x, xep, xsc)
+            x_[:, :2193] = rep.reshape(-1, 2193)
+            x_[:, 2193:] = rsc.reshape(-1, 2193)
+            
+            # Store the cached state
+            cached_state_[1:] = cached_state_[:-1].clone()
+            cached_state_[0] = x_
+
+            # Store the result
+            results[i] = x_
+        return results
+    
+from model_base import fit
+
+class PFMTrainer(Trainer):
+    def __init__(self):
+        self.model = PoissonFixModel().to(Device())
+        self.mse = MSELoss()
+        self.poi = NormalizedPoissonRMSE()
+
+    def forward(self, x: Tensor, y: Tensor) -> Tensor:
+        x = self.model(x)
+        mse = self.mse(x, y)
+        poi = self.poi(x[:, :2193].reshape(-1, 129, 17), x[:, 2193:].reshape(-1, 129, 17))
+        self.add_loss("MSE", mse.item())
+        self.add_loss("Poisson", poi.item())
+        return mse + poi
+    
+idx = util.TRAINING_IDXS["First 30"]
+model_ = PFMTrainer()
+y = torch.cat([ep.reshape(-1, 2193), sc.reshape(-1, 2193)], dim = 1)
+model = fit(model_, vg, y, idx, epochs=500)
